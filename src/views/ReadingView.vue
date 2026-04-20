@@ -49,7 +49,7 @@
     </div>
 
     <!-- 章节列表 -->
-    <div v-if="showChapterList" class="float-panel chapter-dropdown" @mousedown.stop @click.stop>
+    <div v-if="showChapterList" ref="chapterListRef" class="float-panel chapter-dropdown" @mousedown.stop @click.stop>
       <div class="chapter-back" @click="backToLibrary">返回书架</div>
       <div v-for="ch in chapters" :key="ch" class="chapter-item" :class="{ active: ch === currentChapterId }"
         @click="selectChapter(ch)">
@@ -58,23 +58,26 @@
     </div>
 
     <!-- 缩放手柄 -->
-    <div class="resize-handle resize-n" @mousedown.stop.prevent="startResize('n', $event)"></div>
-    <div class="resize-handle resize-s" @mousedown.stop.prevent="startResize('s', $event)"></div>
-    <div class="resize-handle resize-e" @mousedown.stop.prevent="startResize('e', $event)"></div>
-    <div class="resize-handle resize-w" @mousedown.stop.prevent="startResize('w', $event)"></div>
-    <div class="resize-handle resize-ne" @mousedown.stop.prevent="startResize('ne', $event)"></div>
-    <div class="resize-handle resize-nw" @mousedown.stop.prevent="startResize('nw', $event)"></div>
-    <div class="resize-handle resize-se" @mousedown.stop.prevent="startResize('se', $event)"></div>
-    <div class="resize-handle resize-sw" @mousedown.stop.prevent="startResize('sw', $event)"></div>
+    <div class="resize-handle resize-n" @mousedown.stop.prevent="startResize('n')"></div>
+    <div class="resize-handle resize-s" @mousedown.stop.prevent="startResize('s')"></div>
+    <div class="resize-handle resize-e" @mousedown.stop.prevent="startResize('e')"></div>
+    <div class="resize-handle resize-w" @mousedown.stop.prevent="startResize('w')"></div>
+    <div class="resize-handle resize-ne" @mousedown.stop.prevent="startResize('ne')"></div>
+    <div class="resize-handle resize-nw" @mousedown.stop.prevent="startResize('nw')"></div>
+    <div class="resize-handle resize-se" @mousedown.stop.prevent="startResize('se')"></div>
+    <div class="resize-handle resize-sw" @mousedown.stop.prevent="startResize('sw')"></div>
 
     <!-- 内容区域 -->
     <div class="content-area" ref="contentRef" @scroll="onScroll">
       <div class="content-wrapper">
         <div v-if="loading" class="loading">加载中...</div>
         <template v-else>
-          <div v-for="(block, index) in contentBlocks" :key="index" class="text-block"
-            :style="{ color: textColor, fontSize: textSize + 'px' }">
-            {{ block }}
+          <div v-for="(chapter, cidx) in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
+            <div class="chapter-title">{{ chapter.title }}</div>
+            <div v-for="(block, bidx) in chapter.blocks" :key="bidx" class="text-block"
+              :style="{ color: textColor, fontSize: textSize + 'px' }">
+              {{ block }}
+            </div>
           </div>
           <div v-if="loadingNext" class="loading-next">加载下一章...</div>
         </template>
@@ -84,11 +87,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 
 const route = useRoute()
 const router = useRouter()
@@ -96,6 +98,7 @@ const appWindow = getCurrentWindow()
 const bookId = computed(() => route.params.bookId as string)
 
 const contentRef = ref<HTMLElement | null>(null)
+const chapterListRef = ref<HTMLElement | null>(null)
 const isMouseInside = ref(false)
 const showSettings = ref(false)
 const showChapterList = ref(false)
@@ -103,7 +106,7 @@ const loading = ref(false)
 const loadingNext = ref(false)
 const chapters = ref<string[]>([])
 const currentChapterId = ref('')
-const contentBlocks = ref<string[]>([])
+const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>>([])
 const textSize = ref(16)
 const textColor = ref('#e0e0e0')
 
@@ -115,102 +118,36 @@ const onMouseLeave = () => {
   showChapterList.value = false
 }
 
-// 拖拽移动窗口
-let dragLastX = 0
-let dragLastY = 0
-
-const onContainerMouseDown = (e: MouseEvent) => {
-  dragLastX = e.screenX
-  dragLastY = e.screenY
-
-  const onMouseMove = (ev: MouseEvent) => {
-    appWindow.setPosition(new LogicalPosition(ev.screenX - 100, ev.screenY - 10))
-  }
-
-  const onMouseUp = () => {
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
-  }
-
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
+const onContainerMouseDown = () => {
+  appWindow.startDragging()
 }
 
-// 缩放窗口
-let resizeDir = ''
-let resizeLastX = 0
-let resizeLastY = 0
-
-const startResize = (direction: string, e: MouseEvent) => {
-  resizeDir = direction
-  resizeLastX = e.screenX
-  resizeLastY = e.screenY
-
-  const onMouseMove = async (ev: MouseEvent) => {
-    const dx = ev.screenX - resizeLastX
-    const dy = ev.screenY - resizeLastY
-    resizeLastX = ev.screenX
-    resizeLastY = ev.screenY
-
-    const bounds = await appWindow.outerSize()
-    const pos = await appWindow.outerPosition()
-    const w = bounds.width
-    const h = bounds.height
-
-    switch (direction) {
-      case 'n':
-        appWindow.setSize(new LogicalSize(w, h - dy))
-        appWindow.setPosition(new LogicalPosition(pos.x, pos.y + dy))
-        break
-      case 's':
-        appWindow.setSize(new LogicalSize(w, h + dy))
-        break
-      case 'e':
-        appWindow.setSize(new LogicalSize(w + dx, h))
-        break
-      case 'w':
-        appWindow.setSize(new LogicalSize(w - dx, h))
-        appWindow.setPosition(new LogicalPosition(pos.x + dx, pos.y))
-        break
-      case 'ne':
-        appWindow.setSize(new LogicalSize(w + dx, h - dy))
-        appWindow.setPosition(new LogicalPosition(pos.x, pos.y + dy))
-        break
-      case 'nw':
-        appWindow.setSize(new LogicalSize(w - dx, h - dy))
-        appWindow.setPosition(new LogicalPosition(pos.x + dx, pos.y + dy))
-        break
-      case 'se':
-        appWindow.setSize(new LogicalSize(w + dx, h + dy))
-        break
-      case 'sw':
-        appWindow.setSize(new LogicalSize(w - dx, h + dy))
-        appWindow.setPosition(new LogicalPosition(pos.x + dx, pos.y))
-        break
-    }
-  }
-
-  const onMouseUp = () => {
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
-  }
-
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
+const dirMap: Record<string, 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'> = {
+  n: 'North', s: 'South', e: 'East', w: 'West',
+  ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest',
 }
 
-// 保存/加载进度
+const startResize = (direction: string) => {
+  appWindow.startResizeDragging(dirMap[direction])
+}
+
+// 保存/加载进度（scroll 为相对于当前章节 div 顶部的偏移）
 const saveProgress = async () => {
   try {
-    const progress = await invoke<Record<string, string>>('load_progress')
-    progress[bookId.value] = currentChapterId.value
-    await invoke('save_progress', { progress: { entries: progress } })
+    const chapterEl = contentRef.value?.querySelector(`[data-chapter="${currentChapterId.value}"]`) as HTMLElement | null
+    const scroll = chapterEl ? (contentRef.value!.scrollTop - chapterEl.offsetTop) : 0
+    const progress = await invoke<{ entries: Record<string, any> }>('load_progress')
+    progress.entries[bookId.value] = {
+      chapter: currentChapterId.value,
+      scroll: Math.max(0, scroll),
+    }
+    await invoke('save_progress', { progress })
   } catch {}
 }
 
-const loadProgress = async (): Promise<string | null> => {
+const loadProgress = async () => {
   try {
-    const progress = await invoke<{ entries: Record<string, string> }>('load_progress')
+    const progress = await invoke<{ entries: Record<string, { chapter: string; scroll: number }> }>('load_progress')
     return progress.entries[bookId.value] || null
   } catch {
     return null
@@ -220,19 +157,10 @@ const loadProgress = async (): Promise<string | null> => {
 // 保存设置
 const saveSettings = async () => {
   try {
-    const bounds = await appWindow.outerPosition()
-    const size = await appWindow.outerSize()
-    const current = await invoke<any>('load_settings')
     await invoke('save_settings', {
       settings: {
         font_size: textSize.value,
         text_color: textColor.value,
-        window_bounds: {
-          x: bounds.x,
-          y: bounds.y,
-          width: size.width,
-          height: size.height,
-        },
       },
     })
   } catch {}
@@ -243,11 +171,6 @@ const loadSettings = async () => {
     const settings = await invoke<any>('load_settings')
     if (settings?.font_size) textSize.value = settings.font_size
     if (settings?.text_color) textColor.value = settings.text_color
-    if (settings?.window_bounds) {
-      const b = settings.window_bounds
-      appWindow.setPosition(new LogicalPosition(b.x, b.y))
-      appWindow.setSize(new LogicalSize(b.width, b.height))
-    }
   } catch {}
 }
 
@@ -258,7 +181,9 @@ const loadChapters = async () => {
 const loadChapterContent = async (chapterId: string) => {
   loading.value = true
   const content = await invoke<string>('read_chapter', { bookId: bookId.value, chapterId })
-  contentBlocks.value = content.split('\n').filter(line => line.trim())
+  const blocks = content.split('\n').filter(line => line.trim())
+  const title = chapterId.replace(/^\d+_/, '')
+  chapterBlocks.value = [{ id: chapterId, title, blocks }]
   currentChapterId.value = chapterId
   loading.value = false
   if (contentRef.value) {
@@ -267,10 +192,23 @@ const loadChapterContent = async (chapterId: string) => {
   saveProgress()
 }
 
+const restoreProgress = async () => {
+  const saved = await loadProgress()
+  if (!saved?.chapter || !chapters.value.includes(saved.chapter)) return
+  await loadChapterContent(saved.chapter)
+  setTimeout(() => {
+    if (contentRef.value) {
+      contentRef.value.scrollTop = saved.scroll || 0
+    }
+  }, 100)
+}
+
 const selectChapter = (chapterId: string) => {
   showChapterList.value = false
   loadChapterContent(chapterId)
 }
+
+let scrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const onScroll = () => {
   if (!contentRef.value) return
@@ -278,6 +216,8 @@ const onScroll = () => {
   if (scrollHeight - scrollTop - clientHeight < 50 && !loadingNext.value) {
     loadNextChapter()
   }
+  if (scrollTimer) clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => saveProgress(), 300)
 }
 
 const loadNextChapter = async () => {
@@ -289,10 +229,16 @@ const loadNextChapter = async () => {
   if (!nextChapterId) { loadingNext.value = false; return }
   const content = await invoke<string>('read_chapter', { bookId: bookId.value, chapterId: nextChapterId })
   const blocks = content.split('\n').filter(line => line.trim())
-  contentBlocks.value.push(...blocks)
+  const title = nextChapterId.replace(/^\d+_/, '')
+  chapterBlocks.value.push({ id: nextChapterId, title, blocks })
   currentChapterId.value = nextChapterId
   saveProgress()
   loadingNext.value = false
+  await nextTick()
+  const chapterEl = contentRef.value?.querySelector(`[data-chapter="${nextChapterId}"]`) as HTMLElement | null
+  if (chapterEl) {
+    chapterEl.scrollIntoView({ block: 'start' })
+  }
 }
 
 const backToLibrary = () => {
@@ -302,26 +248,20 @@ const backToLibrary = () => {
 // Auto-save settings on change
 watch([textSize, textColor], saveSettings)
 
-// Save bounds on window events
-const onBoundsChanged = () => { saveSettings() }
-let unlistenFns: Array<() => void> = []
+// 打开章节列表时自动滚到当前章节
+watch(showChapterList, (val) => {
+  if (val) {
+    setTimeout(() => {
+      const active = chapterListRef.value?.querySelector('.chapter-item.active')
+      active?.scrollIntoView({ block: 'center' })
+    }, 50)
+  }
+})
 
 onMounted(async () => {
   await loadSettings()
   await loadChapters()
-  const savedChapter = await loadProgress()
-  const startChapter = savedChapter && chapters.value.includes(savedChapter)
-    ? savedChapter
-    : chapters.value[0]
-  if (startChapter) {
-    await loadChapterContent(startChapter)
-  }
-  unlistenFns.push(await appWindow.onMoved(onBoundsChanged))
-  unlistenFns.push(await appWindow.onResized(onBoundsChanged))
-})
-
-onUnmounted(() => {
-  unlistenFns.forEach(fn => fn())
+  await restoreProgress()
 })
 </script>
 
@@ -354,13 +294,9 @@ onUnmounted(() => {
   width: 16px;
   height: 1px;
   border-radius: 1px;
-  background: rgba(150, 150, 150, 0.2);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.mouse-inside .btn-trigger::after {
+  background: rgba(150, 150, 150, 0.15);
   opacity: 1;
+  transition: opacity 0.15s;
 }
 
 .btn-trigger:hover::after {
@@ -526,21 +462,18 @@ onUnmounted(() => {
   bottom: 36px;
   right: 8px;
   max-height: 300px;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 6px 0;
-  min-width: 200px;
-  max-width: 320px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-width: none;
 }
 
 .chapter-dropdown::-webkit-scrollbar {
-  width: 4px;
+  display: none;
 }
 
-.chapter-dropdown::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+.chapter-dropdown {
+  min-width: 200px;
+  max-width: 320px;
 }
 
 .chapter-back {
@@ -577,36 +510,33 @@ onUnmounted(() => {
 /* 内容区域 */
 .content-area {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-x: hidden;
   padding: 40px 32px 50px;
-  pointer-events: none;
-  opacity: 0;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  pointer-events: auto;
+  opacity: 1;
+  scrollbar-width: none;
+}
+
+.content-area::-webkit-scrollbar {
+  display: none;
 }
 
 .mouse-inside .content-area {
   pointer-events: auto;
-  opacity: 1;
-}
-
-.content-area::-webkit-scrollbar {
-  width: 4px;
-}
-
-.content-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.content-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 2px;
 }
 
 .content-wrapper {
   max-width: 600px;
   margin: 0 auto;
+}
+
+.chapter-title {
+  color: rgba(255, 255, 0.5);
+  font-size: 14px;
+  padding: 12px 0 6px;
+  text-indent: 0;
+  user-select: none;
 }
 
 .text-block {

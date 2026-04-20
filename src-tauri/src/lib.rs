@@ -25,13 +25,10 @@ struct BookMetadata {
 struct Settings {
     font_size: u32,
     text_color: String,
-    window_bounds: Option<WindowBounds>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct WindowBounds {
-    x: i32,
-    y: i32,
     width: u32,
     height: u32,
 }
@@ -41,25 +38,19 @@ impl Default for Settings {
         Settings {
             font_size: 16,
             text_color: "#e0e0e0".to_string(),
-            window_bounds: None,
         }
     }
 }
 
 #[derive(Serialize, Deserialize)]
 struct Progress {
-    #[serde(flatten)]
-    entries: std::collections::HashMap<String, String>,
+    entries: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[command]
-async fn select_file(app: tauri::AppHandle, filters: Vec<Vec<String>>) -> Option<String> {
-    let mut dlg = app.dialog().file();
-    for f in &filters {
-        let name = f.first().cloned().unwrap_or_default();
-        let extensions: Vec<&str> = f.get(1..).map(|s| s.iter().map(|x| x.as_str()).collect()).unwrap_or_default();
-        dlg = dlg.add_filter(name, &extensions);
-    }
+async fn select_file(app: tauri::AppHandle) -> Option<String> {
+    let dlg = app.dialog().file()
+        .add_filter("Novel", &["epub", "txt"]);
     let (tx, rx) = std::sync::mpsc::channel();
     dlg.pick_file(move |path| {
         let _ = tx.send(path.map(|p| p.to_string()));
@@ -192,12 +183,52 @@ fn load_progress(app: tauri::AppHandle) -> Result<Progress, String> {
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
+fn save_window_bounds(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        if let Ok(size) = win.outer_size() {
+            let bounds = WindowBounds {
+                width: size.width,
+                height: size.height,
+            };
+            let _ = fs::write(
+                app_data_dir(app).join("window_bounds.json"),
+                serde_json::to_string(&bounds).unwrap_or_default(),
+            );
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_log::Builder::default().build())
+        .setup(|app| {
+            // 恢复窗口大小（不恢复位置，避免多屏幕问题）
+            let bounds_path = app_data_dir(&app.handle()).join("window_bounds.json");
+            if let Ok(content) = fs::read_to_string(&bounds_path) {
+                if let Ok(bounds) = serde_json::from_str::<WindowBounds>(&content) {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.set_size(tauri::Size::Physical(
+                            tauri::PhysicalSize::new(bounds.width, bounds.height),
+                        ));
+                    }
+                }
+            }
+
+            // 监听窗口移动/缩放事件保存 bounds
+            let app_handle = app.handle().clone();
+            if let Some(win) = app.get_webview_window("main") {
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) = event {
+                        save_window_bounds(&app_handle);
+                    }
+                });
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             select_file,
             read_file_binary,
