@@ -1,13 +1,14 @@
 <template>
-  <div class="slack-off-container" :class="{ 'mouse-inside': isMouseInside }" @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown">
+  <div class="slack-off-container" :class="{ 'mouse-inside': hideOnLeave ? isMouseInside : true }" :style="containerStyle"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown" @click="onClickOutside">
     <!-- 关闭按钮 -->
-    <div class="btn-trigger btn-close-pos" @mousedown.stop>
+    <div class="btn-trigger btn-close-pos" @mousedown.stop @click.stop>
       <button class="btn-action btn-close" @click="backToLibrary">x</button>
     </div>
 
     <!-- 设置按钮 -->
-    <div class="btn-trigger btn-settings-pos" @mousedown.stop>
+    <div class="btn-trigger btn-settings-pos" @mousedown.stop @click.stop>
       <button class="btn-action btn-settings" @click="showSettings = !showSettings; showChapterList = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3" />
@@ -36,10 +37,29 @@
             class="color-picker" />
         </div>
       </div>
+      <div class="settings-row">
+        <label>背景</label>
+        <div class="color-presets">
+          <div v-for="c in bgPresets" :key="c" class="color-dot" :style="{ background: c }"
+            :class="{ active: bgColor === c }" @click="bgColor = c"></div>
+          <input type="color" :value="bgColor" @input="bgColor = ($event.target as HTMLInputElement).value"
+            class="color-picker" />
+        </div>
+      </div>
+      <div class="settings-row">
+        <label>透明度</label>
+        <input type="range" min="0" max="100" step="1" v-model.number="bgOpacity" class="opacity-slider" />
+      </div>
+      <div class="settings-row">
+        <label>移出隐藏</label>
+        <div class="toggle-switch" :class="{ active: hideOnLeave }" @click="hideOnLeave = !hideOnLeave">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
     </div>
 
     <!-- 章节选择图标 -->
-    <div class="btn-trigger btn-chapter-pos" @mousedown.stop>
+    <div class="btn-trigger btn-chapter-pos" @mousedown.stop @click.stop>
       <button class="btn-action btn-chapter" @click="showChapterList = !showChapterList; showSettings = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -72,7 +92,7 @@
       <div class="content-wrapper">
         <div v-if="loading" class="loading">加载中...</div>
         <template v-else>
-          <div v-for="(chapter, cidx) in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
+          <div v-for="chapter in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
             <div class="chapter-title">{{ chapter.title }}</div>
             <div v-for="(block, bidx) in chapter.blocks" :key="bidx" class="text-block"
               :style="{ color: textColor, fontSize: textSize + 'px' }">
@@ -87,10 +107,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen } from '@tauri-apps/api/event'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,13 +130,28 @@ const currentChapterId = ref('')
 const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>>([])
 const textSize = ref(16)
 const textColor = ref('#e0e0e0')
+const bgColor = ref('#1a1a1a')
+const bgOpacity = ref(85)
+const hideOnLeave = ref(true)
 
 const colorPresets = ['#e0e0e0', '#ffffff', '#a0d8ef', '#c8e6c9', '#ffccbc', '#e1bee7']
+const bgPresets = ['#ffffff', '#000000', '#1a1a1a', '#2c3e50', '#1e3a2f', '#3b1f1f', '#1f1f3b']
 
-const onMouseEnter = () => { isMouseInside.value = true }
+const containerStyle = computed(() => ({
+  background: bgColor.value + Math.round(bgOpacity.value * 2.55).toString(16).padStart(2, '0'),
+}))
+
+const onMouseEnter = () => {
+  isMouseInside.value = true
+}
 const onMouseLeave = () => {
+  if (showSettings.value || showChapterList.value) return
   isMouseInside.value = false
-  showChapterList.value = false
+}
+
+const onClickOutside = () => {
+  if (showSettings.value) showSettings.value = false
+  if (showChapterList.value) showChapterList.value = false
 }
 
 const onContainerMouseDown = () => {
@@ -161,6 +197,9 @@ const saveSettings = async () => {
       settings: {
         font_size: textSize.value,
         text_color: textColor.value,
+        bg_color: bgColor.value,
+        bg_opacity: bgOpacity.value,
+        hide_on_leave: hideOnLeave.value,
       },
     })
   } catch {}
@@ -171,6 +210,9 @@ const loadSettings = async () => {
     const settings = await invoke<any>('load_settings')
     if (settings?.font_size) textSize.value = settings.font_size
     if (settings?.text_color) textColor.value = settings.text_color
+    if (settings?.bg_color) bgColor.value = settings.bg_color
+    if (settings?.bg_opacity !== undefined) bgOpacity.value = settings.bg_opacity
+    if (settings?.hide_on_leave !== undefined) hideOnLeave.value = settings.hide_on_leave
   } catch {}
 }
 
@@ -196,11 +238,10 @@ const restoreProgress = async () => {
   const saved = await loadProgress()
   if (!saved?.chapter || !chapters.value.includes(saved.chapter)) return
   await loadChapterContent(saved.chapter)
-  setTimeout(() => {
-    if (contentRef.value) {
-      contentRef.value.scrollTop = saved.scroll || 0
-    }
-  }, 100)
+  await nextTick()
+  if (contentRef.value) {
+    contentRef.value.scrollTop = saved.scroll || 0
+  }
 }
 
 const selectChapter = (chapterId: string) => {
@@ -246,7 +287,7 @@ const backToLibrary = () => {
 }
 
 // Auto-save settings on change
-watch([textSize, textColor], saveSettings)
+watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave], saveSettings)
 
 // 打开章节列表时自动滚到当前章节
 watch(showChapterList, (val) => {
@@ -262,6 +303,10 @@ onMounted(async () => {
   await loadSettings()
   await loadChapters()
   await restoreProgress()
+
+  const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
+  const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
+  onUnmounted(() => { unlistenEnter(); unlistenLeave() })
 })
 </script>
 
@@ -295,8 +340,13 @@ onMounted(async () => {
   height: 1px;
   border-radius: 1px;
   background: rgba(150, 150, 150, 0.15);
-  opacity: 1;
+  opacity: 0;
   transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.mouse-inside .btn-trigger::after {
+  opacity: 1;
 }
 
 .btn-trigger:hover::after {
@@ -320,9 +370,13 @@ onMounted(async () => {
   pointer-events: none;
 }
 
+.mouse-inside .btn-trigger .btn-action {
+  opacity: 0.2;
+  pointer-events: auto;
+}
+
 .btn-trigger:hover .btn-action {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .btn-action svg {
@@ -354,7 +408,7 @@ onMounted(async () => {
   z-index: 25;
   background: rgba(25, 25, 25, 0.95);
   border-radius: 10px;
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -456,6 +510,54 @@ onMounted(async () => {
   border-radius: 50%;
 }
 
+.opacity-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.toggle-switch {
+  width: 36px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-switch.active {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.toggle-knob {
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s;
+}
+
+.toggle-switch.active .toggle-knob {
+  left: 18px;
+}
+
 /* 章节列表 */
 .chapter-dropdown {
   position: absolute;
@@ -513,8 +615,8 @@ onMounted(async () => {
   overflow-y: scroll;
   overflow-x: hidden;
   padding: 40px 32px 50px;
-  pointer-events: auto;
-  opacity: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
   scrollbar-width: none;
 }
 
@@ -523,7 +625,7 @@ onMounted(async () => {
 }
 
 .mouse-inside .content-area {
-  pointer-events: auto;
+  opacity: 1;
 }
 
 .content-wrapper {

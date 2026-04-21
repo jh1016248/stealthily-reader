@@ -1,5 +1,6 @@
 <template>
-  <div class="slack-off-container" :class="{ 'mouse-inside': isMouseInside }" @mouseenter="onMouseEnter"
+  <div class="slack-off-container" :class="{ 'mouse-inside': isMouseInside }" :style="containerStyle"
+    @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown">
     <!-- 关闭按钮 -->
     <div class="btn-trigger btn-close-pos" @mousedown.stop>
@@ -51,13 +52,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 import { parseEpubFile, generateChapterId } from '@/lib/epub-parser'
 import { parseTxtFile } from '@/lib/txt-parser'
+import { listen } from '@tauri-apps/api/event'
 
 const router = useRouter()
 
@@ -70,6 +72,12 @@ interface Book {
 }
 
 const isMouseInside = ref(false)
+const bgColor = ref('#1a1a1a')
+const bgOpacity = ref(85)
+
+const containerStyle = computed(() => ({
+  background: bgColor.value + Math.round(bgOpacity.value * 2.55).toString(16).padStart(2, '0'),
+}))
 const loading = ref(false)
 const loadingText = ref('')
 const books = ref<Book[]>([])
@@ -188,6 +196,11 @@ onMounted(async () => {
   await loadBooks()
   try {
     const settings = await invoke<any>('load_settings')
+    if (settings?.bg_color) bgColor.value = settings.bg_color
+    if (settings?.bg_opacity !== undefined) bgOpacity.value = settings.bg_opacity
+  } catch {}
+  try {
+    const settings = await invoke<any>('load_settings')
     if (settings?.window_bounds) {
       const b = settings.window_bounds
       const screen = await currentMonitor()
@@ -201,6 +214,9 @@ onMounted(async () => {
       }
     }
   } catch {}
+  const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
+  const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
+  onUnmounted(() => { unlistenEnter(); unlistenLeave() })
 })
 </script>
 
@@ -234,8 +250,13 @@ onMounted(async () => {
   height: 1px;
   border-radius: 1px;
   background: rgba(150, 150, 150, 0.15);
-  opacity: 1;
+  opacity: 0;
   transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.mouse-inside .btn-trigger::after {
+  opacity: 1;
 }
 
 .btn-trigger:hover::after {
@@ -259,9 +280,13 @@ onMounted(async () => {
   pointer-events: none;
 }
 
+.mouse-inside .btn-trigger .btn-action {
+  opacity: 0.2;
+  pointer-events: auto;
+}
+
 .btn-trigger:hover .btn-action {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .btn-action svg {
@@ -347,7 +372,7 @@ onMounted(async () => {
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
-  backdrop-filter: blur(20px);
+  backdrop-filter: none;
 }
 
 .book-card:hover {
