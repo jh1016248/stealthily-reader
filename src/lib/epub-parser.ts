@@ -70,23 +70,31 @@ function sanitizeFileName(name: string): string {
 export async function parseEpubFile(arrayBuffer: ArrayBuffer): Promise<ParsedBook> {
   const zip = await JSZip.loadAsync(arrayBuffer)
 
-  const fileMap = new Map<string, ArrayBuffer>()
+  const fileCache = new Map<string, ArrayBuffer>()
   const sizeMap = new Map<string, number>()
   zip.forEach((relativePath, file) => {
-    fileMap.set(relativePath, file.async('arraybuffer') as any)
     // @ts-expect-error JSZip internal property for uncompressed size
     sizeMap.set(relativePath, file._data?.uncompressedSize || 0)
   })
 
-  const loadText = (uri: string): string | null => {
-    const data = fileMap.get(uri)
+  const loadFile = async (uri: string): Promise<ArrayBuffer | null> => {
+    if (fileCache.has(uri)) return fileCache.get(uri)!
+    const zipEntry = zip.file(uri)
+    if (!zipEntry) return null
+    const data = await zipEntry.async('arraybuffer')
+    fileCache.set(uri, data)
+    return data
+  }
+
+  const loadText = async (uri: string): Promise<string | null> => {
+    const data = await loadFile(uri)
     if (!data) return null
-    const decoder = new TextDecoder('utf-8')
+    const decoder = new TextDecoder('utf-8', { fatal: false })
     return decoder.decode(data)
   }
 
-  const loadBlob = (uri: string): ArrayBuffer | null => {
-    return fileMap.get(uri) || null
+  const loadBlob = async (uri: string): Promise<ArrayBuffer | null> => {
+    return loadFile(uri)
   }
 
   const getSize = (name: string): number => {

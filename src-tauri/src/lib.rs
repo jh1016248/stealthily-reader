@@ -65,8 +65,9 @@ async fn select_file(app: tauri::AppHandle) -> Option<String> {
 }
 
 #[command]
-fn read_file_binary(path: String) -> Result<Vec<u8>, String> {
-    fs::read(&path).map_err(|e| e.to_string())
+fn read_file_binary(path: String) -> Result<tauri::ipc::Response, String> {
+    let data = fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(data))
 }
 
 #[command]
@@ -193,6 +194,7 @@ use std::sync::OnceLock;
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
+#[allow(clashing_extern_declarations)]
 #[cfg(target_os = "macos")]
 mod macos_tracking {
     use std::ffi::c_void;
@@ -205,11 +207,19 @@ mod macos_tracking {
         fn objc_registerClassPair(cls: *mut c_void);
         fn class_addMethod(cls: *mut c_void, name: *const c_void, imp: *const c_void, types: *const i8) -> i8;
 
-        // objc_msgSend has multiple signatures depending on return type and arch
+        #[link_name = "objc_msgSend"]
+        fn msgSend_id(obj: *mut c_void, sel: *const c_void) -> *mut c_void;
+
+        #[link_name = "objc_msgSend"]
+        fn msgSend_id_id(obj: *mut c_void, sel: *const c_void, arg: *mut c_void) -> *mut c_void;
+
         #[cfg(target_arch = "x86_64")]
-        fn objc_msgSend(obj: *mut c_void, sel: *const c_void, ...) -> *mut c_void;
+        #[link_name = "objc_msgSend"]
+        fn msgSend_init_x86(area: *mut c_void, sel: *const c_void, rect: *const [f64; 4], opts: u64, owner: *mut c_void, info: *mut c_void) -> *mut c_void;
+
         #[cfg(target_arch = "aarch64")]
-        fn objc_msgSend(obj: *mut c_void, sel: *const c_void, ...) -> *mut c_void;
+        #[link_name = "objc_msgSend"]
+        fn msgSend_init_arm64(area: *mut c_void, sel: *const c_void, x: f64, y: f64, w: f64, h: f64, opts: u64, owner: *mut c_void, info: *mut c_void) -> *mut c_void;
     }
 
     fn sel(name: &[u8]) -> *const c_void {
@@ -217,21 +227,21 @@ mod macos_tracking {
     }
 
     unsafe fn send_id(obj: *mut c_void, s: *const c_void) -> *mut c_void {
-        objc_msgSend(obj, s)
+        msgSend_id(obj, s)
     }
 
     unsafe fn send_void2(obj: *mut c_void, s: *const c_void, a: *mut c_void) {
-        objc_msgSend(obj, s, a);
+        msgSend_id_id(obj, s, a);
     }
 
     #[cfg(target_arch = "x86_64")]
     unsafe fn send_init(area: *mut c_void, s: *const c_void, rect: &[f64; 4], opts: u64, owner: *mut c_void, info: *mut c_void) -> *mut c_void {
-        objc_msgSend(area, s, rect, opts, owner, info)
+        msgSend_init_x86(area, s, rect, opts, owner, info)
     }
 
     #[cfg(target_arch = "aarch64")]
     unsafe fn send_init(area: *mut c_void, s: *const c_void, x: f64, y: f64, w: f64, h: f64, opts: u64, owner: *mut c_void, info: *mut c_void) -> *mut c_void {
-        objc_msgSend(area, s, x, y, w, h, opts, owner, info)
+        msgSend_init_arm64(area, s, x, y, w, h, opts, owner, info)
     }
 
     extern "C" fn on_mouse_enter(_: *mut c_void, _: *const c_void, _: *mut c_void) {

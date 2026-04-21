@@ -29,6 +29,10 @@
     <!-- 内容区域 -->
     <div class="content-area">
       <div class="content-wrapper library">
+        <div class="library-header">
+          <span class="library-title">我的书架</span>
+          <span class="library-count" v-if="books.length">{{ books.length }} 本</span>
+        </div>
         <div v-if="loading" class="loading">{{ loadingText }}</div>
         <template v-else>
           <div v-if="books.length === 0" class="empty-hint">
@@ -112,9 +116,12 @@ const importBook = async () => {
   loadingText.value = '解析中...'
 
   try {
-    const buffer = await invoke<number[]>('read_file_binary', { path: filePath })
+    console.log('[import] reading file:', filePath)
+    const buffer = await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
+    console.log('[import] buffer size:', buffer.byteLength)
     const uint8 = new Uint8Array(buffer)
     const ext = filePath.split('.').pop()?.toLowerCase()
+    console.log('[import] ext:', ext)
 
     const bookId = `book_${Date.now()}`
     let title = ''
@@ -123,7 +130,9 @@ const importBook = async () => {
     const chapters: Array<{ chapterId: string; content: string }> = []
 
     if (ext === 'epub') {
+      console.log('[import] parsing epub...')
       const result = await parseEpubFile(uint8.buffer)
+      console.log('[import] parsed, title:', result.metadata.title, 'chapters:', result.chapters.length)
       title = result.metadata.title
       author = result.metadata.author
       language = result.metadata.language
@@ -172,8 +181,9 @@ const importBook = async () => {
 
     await loadBooks()
   } catch (e: any) {
-    console.error('Import failed:', e)
-    loadingText.value = `导入失败: ${e}`
+    console.error('[import] failed:', e?.message || e?.toString?.() || e)
+    console.error('[import] stack:', e?.stack)
+    loadingText.value = `导入失败: ${e?.message || e}`
   } finally {
     loading.value = false
   }
@@ -328,7 +338,7 @@ onMounted(async () => {
   flex: 1;
   overflow-y: scroll;
   overflow-x: hidden;
-  padding: 40px 32px 50px;
+  padding: 12px 10px 40px;
   pointer-events: none;
   opacity: 0;
   scrollbar-width: none;
@@ -352,31 +362,52 @@ onMounted(async () => {
 .library {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+}
+
+.library-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 4px 10px;
+}
+
+.library-title {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.library-count {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
 }
 
 .empty-hint {
   text-align: center;
-  color: rgba(255, 255, 255, 0.4);
-  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.3);
+  padding: 60px 20px;
   font-size: 13px;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 
 .book-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.2s;
-  backdrop-filter: none;
+  transition: all 0.2s;
 }
 
 .book-card:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateX(2px);
 }
 
 .book-info {
@@ -385,17 +416,18 @@ onMounted(async () => {
 }
 
 .book-title {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.85);
   font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .book-author {
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.35);
   font-size: 12px;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .btn-delete {

@@ -93,7 +93,7 @@
         <div v-if="loading" class="loading">加载中...</div>
         <template v-else>
           <div v-for="chapter in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
-            <div class="chapter-title">{{ chapter.title }}</div>
+            <div class="chapter-title" :style="{ color: textColor, fontSize: (textSize + 2) + 'px' }">{{ chapter.title }}</div>
             <div v-for="(block, bidx) in chapter.blocks" :key="bidx" class="text-block"
               :style="{ color: textColor, fontSize: textSize + 'px' }">
               {{ block }}
@@ -134,7 +134,7 @@ const bgColor = ref('#1a1a1a')
 const bgOpacity = ref(85)
 const hideOnLeave = ref(true)
 
-const colorPresets = ['#e0e0e0', '#ffffff', '#a0d8ef', '#c8e6c9', '#ffccbc', '#e1bee7']
+const colorPresets = ['#ffffff', '#e0e0e0', '#a0a0a0', '#666666', '#333333', '#000000']
 const bgPresets = ['#ffffff', '#000000', '#1a1a1a', '#2c3e50', '#1e3a2f', '#3b1f1f', '#1f1f3b']
 
 const containerStyle = computed(() => ({
@@ -634,9 +634,8 @@ onMounted(async () => {
 }
 
 .chapter-title {
-  color: rgba(255, 255, 0.5);
-  font-size: 14px;
-  padding: 12px 0 6px;
+  font-weight: 600;
+  padding: 16px 0 6px;
   text-indent: 0;
   user-select: none;
 }
