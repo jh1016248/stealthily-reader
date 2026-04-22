@@ -29,21 +29,22 @@
     <!-- 内容区域 -->
     <div class="content-area">
       <div class="content-wrapper library">
-        <div class="library-header">
+        <div class="library-header" :style="{ color: textColor }">
           <span class="library-title">我的书架</span>
           <span class="library-count" v-if="books.length">{{ books.length }} 本</span>
         </div>
+        <div v-if="loading" class="loading" :style="{ color: textColor }">{{ loadingText }}</div>
         <div v-if="loading" class="loading">{{ loadingText }}</div>
         <template v-else>
           <div v-if="books.length === 0" class="empty-hint">
             <p>点击 + 导入小说</p>
           </div>
-          <div v-for="book in books" :key="book.id" class="book-card" @click="openBook(book.id)">
+          <div v-for="book in books" :key="book.id" class="book-card" :style="{ borderColor: textColor + '18' }" @click="openBook(book.id)">
             <div class="book-info">
-              <div class="book-title">{{ book.title }}</div>
-              <div class="book-author">{{ book.author }}</div>
+              <div class="book-title" :style="{ color: textColor }">{{ book.title }}</div>
+              <div class="book-author" :style="{ color: textColor + '80' }">{{ book.author }}</div>
             </div>
-            <button class="btn-delete" @click.stop="deleteBook(book.id)" @mousedown.stop>
+            <button class="btn-delete" :style="{ color: textColor + '60' }" @click.stop="deleteBook(book.id)" @mousedown.stop>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
@@ -59,6 +60,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 import { parseEpubFile, generateChapterId } from '@/lib/epub-parser'
@@ -78,6 +80,7 @@ interface Book {
 const isMouseInside = ref(false)
 const bgColor = ref('#1a1a1a')
 const bgOpacity = ref(85)
+const textColor = ref('#e0e0e0')
 
 const containerStyle = computed(() => ({
   background: bgColor.value + Math.round(bgOpacity.value * 2.55).toString(16).padStart(2, '0'),
@@ -194,6 +197,9 @@ const openBook = (bookId: string) => {
 }
 
 const deleteBook = async (bookId: string) => {
+  const book = books.value.find(b => b.id === bookId)
+  const confirmed = await confirm(`确定删除《${book?.title || ''}》？`)
+  if (!confirmed) return
   await invoke('delete_book', { bookId })
   await loadBooks()
 }
@@ -206,6 +212,7 @@ onMounted(async () => {
   await loadBooks()
   try {
     const settings = await invoke<any>('load_settings')
+    if (settings?.text_color) textColor.value = settings.text_color
     if (settings?.bg_color) bgColor.value = settings.bg_color
     if (settings?.bg_opacity !== undefined) bgOpacity.value = settings.bg_opacity
   } catch {}
@@ -226,7 +233,10 @@ onMounted(async () => {
   } catch {}
   const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
   const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
-  onUnmounted(() => { unlistenEnter(); unlistenLeave() })
+  const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
+    if (focused) isMouseInside.value = true
+  })
+  onUnmounted(() => { unlistenEnter(); unlistenLeave(); unlistenFocus() })
 })
 </script>
 
@@ -373,15 +383,14 @@ onMounted(async () => {
 }
 
 .library-title {
-  color: rgba(255, 255, 255, 0.6);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 1px;
 }
 
 .library-count {
-  color: rgba(255, 255, 255, 0.25);
   font-size: 12px;
+  opacity: 0.5;
 }
 
 .empty-hint {
@@ -416,7 +425,6 @@ onMounted(async () => {
 }
 
 .book-title {
-  color: rgba(255, 255, 255, 0.85);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -425,7 +433,6 @@ onMounted(async () => {
 }
 
 .book-author {
-  color: rgba(255, 255, 255, 0.35);
   font-size: 12px;
   margin-top: 3px;
 }
@@ -435,7 +442,6 @@ onMounted(async () => {
   height: 20px;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.3);
   cursor: pointer;
   padding: 0;
   display: flex;

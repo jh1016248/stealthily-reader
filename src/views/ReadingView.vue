@@ -228,9 +228,6 @@ const loadChapterContent = async (chapterId: string) => {
   chapterBlocks.value = [{ id: chapterId, title, blocks }]
   currentChapterId.value = chapterId
   loading.value = false
-  if (contentRef.value) {
-    contentRef.value.scrollTop = 0
-  }
   saveProgress()
 }
 
@@ -244,9 +241,11 @@ const restoreProgress = async () => {
   }
 }
 
-const selectChapter = (chapterId: string) => {
+const selectChapter = async (chapterId: string) => {
   showChapterList.value = false
-  loadChapterContent(chapterId)
+  await loadChapterContent(chapterId)
+  await nextTick()
+  if (contentRef.value) contentRef.value.scrollTop = 0
 }
 
 let scrollTimer: ReturnType<typeof setTimeout> | null = null
@@ -306,7 +305,10 @@ onMounted(async () => {
 
   const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
   const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
-  onUnmounted(() => { unlistenEnter(); unlistenLeave() })
+  const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
+    if (focused) isMouseInside.value = true
+  })
+  onUnmounted(() => { unlistenEnter(); unlistenLeave(); unlistenFocus() })
 })
 </script>
 

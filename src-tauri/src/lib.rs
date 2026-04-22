@@ -191,6 +191,7 @@ fn load_progress(app: tauri::AppHandle) -> Result<Progress, String> {
 }
 
 use std::sync::OnceLock;
+use tauri::Emitter;
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
