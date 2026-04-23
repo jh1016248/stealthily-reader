@@ -92,6 +92,7 @@
       <div class="content-wrapper">
         <div v-if="loading" class="loading">加载中...</div>
         <template v-else>
+          <div v-if="loadingPrev" class="loading-prev">加载上一章...</div>
           <div v-for="chapter in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
             <div class="chapter-title" :style="{ color: textColor, fontSize: (textSize + 2) + 'px' }">{{ chapter.title }}</div>
             <div v-for="(block, bidx) in chapter.blocks" :key="bidx" class="text-block"
@@ -125,6 +126,7 @@ const showSettings = ref(false)
 const showChapterList = ref(false)
 const loading = ref(false)
 const loadingNext = ref(false)
+const loadingPrev = ref(false)
 const chapters = ref<string[]>([])
 const currentChapterId = ref('')
 const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>>([])
@@ -170,11 +172,12 @@ const startResize = (direction: string) => {
 // 保存/加载进度（scroll 为相对于当前章节 div 顶部的偏移）
 const saveProgress = async () => {
   try {
-    const chapterEl = contentRef.value?.querySelector(`[data-chapter="${currentChapterId.value}"]`) as HTMLElement | null
+    const readingChapterId = deriveCurrentChapterId()
+    const chapterEl = contentRef.value?.querySelector(`[data-chapter="${readingChapterId}"]`) as HTMLElement | null
     const scroll = chapterEl ? (contentRef.value!.scrollTop - chapterEl.offsetTop) : 0
     const progress = await invoke<{ entries: Record<string, any> }>('load_progress')
     progress.entries[bookId.value] = {
-      chapter: currentChapterId.value,
+      chapter: readingChapterId,
       scroll: Math.max(0, scroll),
     }
     await invoke('save_progress', { progress })
@@ -220,65 +223,148 @@ const loadChapters = async () => {
   chapters.value = await invoke('list_chapters', { bookId: bookId.value })
 }
 
-const loadChapterContent = async (chapterId: string) => {
-  loading.value = true
+const fetchChapterData = async (chapterId: string) => {
   const content = await invoke<string>('read_chapter', { bookId: bookId.value, chapterId })
   const blocks = content.split('\n').filter(line => line.trim())
   const title = chapterId.replace(/^\d+_/, '')
-  chapterBlocks.value = [{ id: chapterId, title, blocks }]
-  currentChapterId.value = chapterId
+  return { id: chapterId, title, blocks }
+}
+
+const deriveCurrentChapterId = (): string => {
+  if (!contentRef.value) return currentChapterId.value
+  const scrollTop = contentRef.value.scrollTop
+  let detectedId = chapterBlocks.value[0]?.id || ''
+  for (const chapter of chapterBlocks.value) {
+    const el = contentRef.value.querySelector(`[data-chapter="${chapter.id}"]`) as HTMLElement | null
+    if (el && el.offsetTop <= scrollTop) detectedId = chapter.id
+  }
+  return detectedId
+}
+
+const getWindowChapterIds = (centerChapterId: string): string[] => {
+  const idx = chapters.value.findIndex(c => c === centerChapterId)
+  if (idx < 0) return [centerChapterId]
+  const ids: string[] = []
+  if (idx > 0) ids.push(chapters.value[idx - 1])
+  ids.push(chapters.value[idx])
+  if (idx < chapters.value.length - 1) ids.push(chapters.value[idx + 1])
+  return ids
+}
+
+const loadChapterWindow = async (centerChapterId: string) => {
+  loading.value = true
+  const windowIds = getWindowChapterIds(centerChapterId)
+  const results = await Promise.all(windowIds.map(id => fetchChapterData(id)))
+  chapterBlocks.value = results
+  currentChapterId.value = centerChapterId
   loading.value = false
   saveProgress()
+}
+
+const trimTopChapter = async () => {
+  if (chapterBlocks.value.length <= 3) return
+  const removedId = chapterBlocks.value[0].id
+  const el = contentRef.value?.querySelector(`[data-chapter="${removedId}"]`) as HTMLElement | null
+  const removedHeight = el?.offsetHeight || 0
+  const scrollTopBefore = contentRef.value?.scrollTop || 0
+  chapterBlocks.value.shift()
+  if (removedHeight > 0 && scrollTopBefore > removedHeight) {
+    await nextTick()
+    if (contentRef.value) {
+      contentRef.value.scrollTop = scrollTopBefore - removedHeight
+    }
+  }
+}
+
+const trimBottomChapter = () => {
+  if (chapterBlocks.value.length <= 3) return
+  chapterBlocks.value.pop()
 }
 
 const restoreProgress = async () => {
   const saved = await loadProgress()
   if (!saved?.chapter || !chapters.value.includes(saved.chapter)) return
-  await loadChapterContent(saved.chapter)
+  await loadChapterWindow(saved.chapter)
   await nextTick()
   if (contentRef.value) {
-    contentRef.value.scrollTop = saved.scroll || 0
+    const chapterEl = contentRef.value.querySelector(`[data-chapter="${saved.chapter}"]`) as HTMLElement | null
+    if (chapterEl) {
+      contentRef.value.scrollTop = chapterEl.offsetTop + (saved.scroll || 0)
+    }
   }
 }
 
 const selectChapter = async (chapterId: string) => {
   showChapterList.value = false
-  await loadChapterContent(chapterId)
+  await loadChapterWindow(chapterId)
   await nextTick()
-  if (contentRef.value) contentRef.value.scrollTop = 0
+  if (contentRef.value) {
+    const chapterEl = contentRef.value.querySelector(`[data-chapter="${chapterId}"]`) as HTMLElement | null
+    if (chapterEl) {
+      contentRef.value.scrollTop = chapterEl.offsetTop
+    }
+  }
 }
 
 let scrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const onScroll = () => {
-  if (!contentRef.value) return
+  if (!contentRef.value || loading.value) return
   const { scrollTop, scrollHeight, clientHeight } = contentRef.value
+
+  currentChapterId.value = deriveCurrentChapterId()
+
+  if (scrollTop < 50 && !loadingPrev.value) {
+    loadPreviousChapter()
+  }
   if (scrollHeight - scrollTop - clientHeight < 50 && !loadingNext.value) {
     loadNextChapter()
   }
+
   if (scrollTimer) clearTimeout(scrollTimer)
   scrollTimer = setTimeout(() => saveProgress(), 300)
 }
 
 const loadNextChapter = async () => {
-  const idx = chapters.value.findIndex(c => c === currentChapterId.value)
-  if (idx < 0 || idx >= chapters.value.length - 1) return
+  const lastBlock = chapterBlocks.value[chapterBlocks.value.length - 1]
+  if (!lastBlock) return
+  const lastIdx = chapters.value.findIndex(c => c === lastBlock.id)
+  if (lastIdx < 0 || lastIdx >= chapters.value.length - 1) return
+  if (loadingNext.value) return
 
   loadingNext.value = true
-  const nextChapterId = chapters.value[idx + 1]
-  if (!nextChapterId) { loadingNext.value = false; return }
-  const content = await invoke<string>('read_chapter', { bookId: bookId.value, chapterId: nextChapterId })
-  const blocks = content.split('\n').filter(line => line.trim())
-  const title = nextChapterId.replace(/^\d+_/, '')
-  chapterBlocks.value.push({ id: nextChapterId, title, blocks })
-  currentChapterId.value = nextChapterId
-  saveProgress()
+  const nextChapterId = chapters.value[lastIdx + 1]
+  const data = await fetchChapterData(nextChapterId)
+  if (data) chapterBlocks.value.push(data)
   loadingNext.value = false
   await nextTick()
-  const chapterEl = contentRef.value?.querySelector(`[data-chapter="${nextChapterId}"]`) as HTMLElement | null
-  if (chapterEl) {
-    chapterEl.scrollIntoView({ block: 'start' })
+  await trimTopChapter()
+  saveProgress()
+}
+
+const loadPreviousChapter = async () => {
+  const firstBlock = chapterBlocks.value[0]
+  if (!firstBlock) return
+  const firstIdx = chapters.value.findIndex(c => c === firstBlock.id)
+  if (firstIdx <= 0) return
+  if (loadingPrev.value) return
+
+  loadingPrev.value = true
+  const prevChapterId = chapters.value[firstIdx - 1]
+  const scrollTopBefore = contentRef.value?.scrollTop || 0
+
+  const data = await fetchChapterData(prevChapterId)
+  if (data) chapterBlocks.value.unshift(data)
+  loadingPrev.value = false
+  await nextTick()
+
+  const newEl = contentRef.value?.querySelector(`[data-chapter="${prevChapterId}"]`) as HTMLElement | null
+  if (newEl && contentRef.value) {
+    contentRef.value.scrollTop = scrollTopBefore + newEl.offsetHeight
   }
+
+  trimBottomChapter()
+  saveProgress()
 }
 
 const backToLibrary = () => {
@@ -650,6 +736,7 @@ onMounted(async () => {
 }
 
 .loading,
+.loading-prev,
 .loading-next {
   text-align: center;
   color: rgba(255, 255, 255, 0.5);
