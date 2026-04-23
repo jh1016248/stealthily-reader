@@ -336,10 +336,10 @@ const loadNextChapter = async () => {
   const nextChapterId = chapters.value[lastIdx + 1]
   const data = await fetchChapterData(nextChapterId)
   if (data) chapterBlocks.value.push(data)
-  loadingNext.value = false
   await nextTick()
   await trimTopChapter()
   saveProgress()
+  loadingNext.value = false
 }
 
 const loadPreviousChapter = async () => {
@@ -355,7 +355,6 @@ const loadPreviousChapter = async () => {
 
   const data = await fetchChapterData(prevChapterId)
   if (data) chapterBlocks.value.unshift(data)
-  loadingPrev.value = false
   await nextTick()
 
   const newEl = contentRef.value?.querySelector(`[data-chapter="${prevChapterId}"]`) as HTMLElement | null
@@ -365,6 +364,7 @@ const loadPreviousChapter = async () => {
 
   trimBottomChapter()
   saveProgress()
+  loadingPrev.value = false
 }
 
 const backToLibrary = () => {
