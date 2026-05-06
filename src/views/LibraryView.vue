@@ -146,6 +146,14 @@ const importBook = async () => {
           content: ch.content,
         })
       }
+      // Save TOC data for chapter list UI and navigation
+      if (result.nestedToc && result.nestedToc.length > 0) {
+        await invoke('save_toc', { bookId, toc: JSON.stringify({
+          nested: result.nestedToc,
+          flat: result.flatToc,
+          hrefToIndex: result.hrefToChapterIndex,
+        }) })
+      }
     } else {
       const filename = filePath.split(/[/\\]/).pop() || 'unknown'
       const result = parseTxtFile(uint8.buffer, filename)

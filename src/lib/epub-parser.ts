@@ -20,9 +20,30 @@ interface ChapterContent {
   href: string
 }
 
+interface TocItem {
+  label: string
+  href: string
+  subitems?: TocItem[]
+}
+
+interface EpubMetadata {
+  title: string
+  author: string
+  language: string
+}
+
+interface ChapterContent {
+  title: string
+  content: string
+  href: string
+}
+
 interface ParsedBook {
   metadata: EpubMetadata
   chapters: ChapterContent[]
+  flatToc: TocItem[]  // For reading order (labels and hrefs only, no content)
+  nestedToc: TocItem[] // For chapter list UI with volumes
+  hrefToChapterIndex: Record<string, number> // Maps href to chapter index for navigation
 }
 
 function extractTextFromHtml(html: string): string {
@@ -47,15 +68,63 @@ function extractTextFromHtml(html: string): string {
   return text.trim()
 }
 
-function flattenToc(toc: TocItem[]): TocItem[] {
+function isFrontMatter(label: string): boolean {
+  const skipPatterns = ['封面', '简介', '前言', '目录', 'contents', 'Contents', 'CONTENTS', '序言', '写在', '书名页', '版权页', '前折页', '文前插图']
+  return skipPatterns.some(p => label.includes(p))
+}
+
+// Filter front matter from TOC while preserving nested structure
+function filterToc(toc: TocItem[]): TocItem[] {
   const result: TocItem[] = []
   for (const item of toc) {
+    const label = item.label || ''
+
+    // Skip front matter items (but continue to their subitems)
+    if (isFrontMatter(label)) {
+      // Still process subitems in case front matter has nested valid chapters
+      if (item.subitems && item.subitems.length > 0) {
+        const filteredSubitems = filterToc(item.subitems)
+        if (filteredSubitems.length > 0) {
+          result.push(...filteredSubitems)
+        }
+      }
+      continue
+    }
+
+    // If item has subitems, it's a volume/section - keep structure
     if (item.subitems && item.subitems.length > 0) {
-      result.push(...flattenToc(item.subitems))
+      const filteredSubitems = filterToc(item.subitems)
+      // Only add this item if it has href OR has valid subitems
+      if (item.href || filteredSubitems.length > 0) {
+        result.push({
+          label: item.label,
+          href: item.href || '',
+          subitems: filteredSubitems.length > 0 ? filteredSubitems : undefined,
+        })
+      } else if (filteredSubitems.length > 0) {
+        // No href, but has valid subitems - spread them at this level
+        result.push(...filteredSubitems)
+      }
     } else {
-      const label = item.label || ''
-      const skipPatterns = ['封面', '简介', '前言', '目录', 'contents', 'Contents', 'CONTENTS', '序言', '写在', '书名页', '版权页', '前折页', '文前插图']
-      if (!skipPatterns.some(p => label.includes(p))) {
+      // Leaf item (chapter with no subitems)
+      result.push(item)
+    }
+  }
+  return result
+}
+
+// Flatten TOC for sequential reading (extracts all leaf chapters)
+function flattenTocForReading(toc: TocItem[], hrefsToSkip: Set<string> = new Set()): TocItem[] {
+  const result: TocItem[] = []
+  for (const item of toc) {
+    // If item has subitems, recursively get all leaf chapters
+    if (item.subitems && item.subitems.length > 0) {
+      result.push(...flattenTocForReading(item.subitems, hrefsToSkip))
+    } else {
+      // Leaf item - only add if href not already collected
+      const href = item.href.split('#')[0]
+      if (!hrefsToSkip.has(href)) {
+        hrefsToSkip.add(href)
         result.push(item)
       }
     }
@@ -119,10 +188,12 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer): Promise<ParsedBoo
   }
 
   const toc: TocItem[] = book.toc || []
-  const flatToc = flattenToc(toc)
+  const filteredToc = filterToc(toc)
+  const flatToc = flattenTocForReading(filteredToc)
 
   const chapters: ChapterContent[] = []
   const seenHrefs = new Set<string>()
+  const hrefToChapterIndex: Record<string, number> = {}
 
   for (const tocItem of flatToc) {
     const href = tocItem.href.split('#')[0]
@@ -136,18 +207,20 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer): Promise<ParsedBoo
       const htmlContent = await zipEntry.async('text')
       const text = extractTextFromHtml(htmlContent)
       if (text.trim()) {
+        const chapterIndex = chapters.length
         chapters.push({
           title: tocItem.label,
           content: text.trim(),
           href: tocItem.href,
         })
+        hrefToChapterIndex[href] = chapterIndex
       }
     } catch (e) {
       console.warn('Failed to load chapter:', href, e)
     }
   }
 
-  return { metadata, chapters }
+  return { metadata, chapters, flatToc, nestedToc: filteredToc, hrefToChapterIndex }
 }
 
 export function generateChapterId(index: number, title: string): string {

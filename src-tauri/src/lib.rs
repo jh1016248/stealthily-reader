@@ -32,6 +32,8 @@ struct Settings {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct WindowBounds {
+    x: i32,
+    y: i32,
     width: u32,
     height: u32,
 }
@@ -111,6 +113,23 @@ fn save_chapter(
     let chapter_dir = books_dir(&app).join(&book_id).join("chapters").join(&chapter_id);
     fs::create_dir_all(&chapter_dir).map_err(|e| e.to_string())?;
     fs::write(chapter_dir.join("content.txt"), content).map_err(|e| e.to_string())
+}
+
+#[command]
+fn save_toc(app: tauri::AppHandle, book_id: String, toc: String) -> Result<(), String> {
+    let book_dir = books_dir(&app).join(&book_id);
+    fs::create_dir_all(&book_dir).map_err(|e| e.to_string())?;
+    fs::write(book_dir.join("toc.json"), toc).map_err(|e| e.to_string())
+}
+
+#[command]
+fn load_toc(app: tauri::AppHandle, book_id: String) -> Result<Option<String>, String> {
+    let path = books_dir(&app).join(&book_id).join("toc.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(Some(content))
 }
 
 #[command]
@@ -295,8 +314,10 @@ mod macos_tracking {
 
 fn save_window_bounds(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        if let Ok(size) = win.outer_size() {
+        if let (Ok(size), Ok(position)) = (win.outer_size(), win.outer_position()) {
             let bounds = WindowBounds {
+                x: position.x,
+                y: position.y,
                 width: size.width,
                 height: size.height,
             };
@@ -317,15 +338,22 @@ pub fn run() {
         .setup(|app| {
             APP_HANDLE.set(app.handle().clone()).ok();
 
-            // 恢复窗口大小（不恢复位置，避免多屏幕问题）
+            // 恢复窗口位置和大小
             let bounds_path = app_data_dir(&app.handle()).join("window_bounds.json");
-            if let Ok(content) = fs::read_to_string(&bounds_path) {
-                if let Ok(bounds) = serde_json::from_str::<WindowBounds>(&content) {
-                    if let Some(win) = app.get_webview_window("main") {
+            if let Some(win) = app.get_webview_window("main") {
+                if let Ok(content) = fs::read_to_string(&bounds_path) {
+                    if let Ok(bounds) = serde_json::from_str::<WindowBounds>(&content) {
+                        // 恢复位置和大小
+                        let _ = win.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(bounds.x, bounds.y),
+                        ));
                         let _ = win.set_size(tauri::Size::Physical(
                             tauri::PhysicalSize::new(bounds.width, bounds.height),
                         ));
                     }
+                } else {
+                    // 首次打开，居中显示
+                    let _ = win.center();
                 }
             }
 
@@ -357,6 +385,8 @@ pub fn run() {
             list_books,
             save_book,
             save_chapter,
+            save_toc,
+            load_toc,
             list_chapters,
             read_chapter,
             delete_book,

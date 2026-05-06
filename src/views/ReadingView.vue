@@ -71,10 +71,30 @@
     <!-- 章节列表 -->
     <div v-if="showChapterList" ref="chapterListRef" class="float-panel chapter-dropdown" @mousedown.stop @click.stop>
       <div class="chapter-back" @click="backToLibrary">返回书架</div>
-      <div v-for="ch in chapters" :key="ch" class="chapter-item" :class="{ active: ch === currentChapterId }"
-        @click="selectChapter(ch)">
-        {{ ch.replace(/^\d+_/, '') }}
-      </div>
+      <template v-if="nestedChapters.length > 0">
+        <template v-for="(item, idx) in nestedChapters" :key="idx">
+          <div v-if="item.subitems && item.subitems.length > 0" class="chapter-group" @click="toggleChapterGroup(idx)">
+            <span class="chapter-group-icon">{{ item.expanded ? '▼' : '▶' }}</span>
+            <span class="chapter-group-label">{{ item.label }}</span>
+          </div>
+          <div v-else-if="item.href" class="chapter-item" :class="{ active: isCurrentChapter(item.href) }"
+            @click="selectChapterByHref(item.href)">
+            {{ item.label }}
+          </div>
+          <template v-if="item.subitems && item.subitems.length > 0 && item.expanded">
+            <div v-for="subitem in item.subitems" :key="subitem.href" class="chapter-item chapter-subitem"
+              :class="{ active: isCurrentChapter(subitem.href) }" @click="selectChapterByHref(subitem.href)">
+              {{ subitem.label }}
+            </div>
+          </template>
+        </template>
+      </template>
+      <template v-else>
+        <div v-for="ch in chapters" :key="ch" class="chapter-item" :class="{ active: ch === currentChapterId }"
+          @click="selectChapter(ch)">
+          {{ ch.replace(/^\d+_/, '') }}
+        </div>
+      </template>
     </div>
 
     <!-- 缩放手柄 -->
@@ -129,6 +149,8 @@ const loadingNext = ref(false)
 const loadingPrev = ref(false)
 const chapters = ref<string[]>([])
 const currentChapterId = ref('')
+const nestedChapters = ref<Array<{ label: string; href?: string; subitems?: any[]; expanded?: boolean }>>([])
+const hrefToIndex = ref<Record<string, number>>({})
 const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>>([])
 const textSize = ref(16)
 const textColor = ref('#e0e0e0')
@@ -221,6 +243,44 @@ const loadSettings = async () => {
 
 const loadChapters = async () => {
   chapters.value = await invoke('list_chapters', { bookId: bookId.value })
+  // Load nested TOC for chapter list UI
+  try {
+    const toc = await invoke<string | null>('load_toc', { bookId: bookId.value })
+    if (toc) {
+      const tocData = JSON.parse(toc)
+      nestedChapters.value = tocData.nested || []
+      hrefToIndex.value = tocData.hrefToIndex || {}
+    } else {
+      // Fallback: create flat structure from chapter IDs
+      nestedChapters.value = chapters.value.map(ch => ({ label: ch.replace(/^\d+_/, ''), href: ch }))
+    }
+  } catch {
+    nestedChapters.value = chapters.value.map(ch => ({ label: ch.replace(/^\d+_/, ''), href: ch }))
+  }
+}
+
+const toggleChapterGroup = (index: number) => {
+  if (nestedChapters.value[index]) {
+    nestedChapters.value[index].expanded = !nestedChapters.value[index].expanded
+  }
+}
+
+const selectChapterByHref = (href: string) => {
+  // Find the chapter by href using the index mapping
+  const hrefBase = href.split('#')[0]
+  const chapterIndex = hrefToIndex.value[hrefBase]
+  if (chapterIndex !== undefined && chapterIndex < chapters.value.length) {
+    selectChapter(chapters.value[chapterIndex])
+  }
+}
+
+const isCurrentChapter = (href: string): boolean => {
+  const hrefBase = href.split('#')[0]
+  const chapterIndex = hrefToIndex.value[hrefBase]
+  if (chapterIndex !== undefined && chapterIndex < chapters.value.length) {
+    return chapters.value[chapterIndex] === currentChapterId.value
+  }
+  return false
 }
 
 const fetchChapterData = async (chapterId: string) => {
@@ -391,9 +451,18 @@ onMounted(async () => {
 
   const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
   const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
+
+  // 监听窗口焦点变化
+  // 当 Dock 图标被点击激活窗口时显示内容
   const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
-    if (focused) isMouseInside.value = true
+    if (focused) {
+      // 窗口获得焦点（ Dock 点击激活）
+      isMouseInside.value = true
+    }
+    // 注意：窗口失去焦点时不再自动隐藏内容
+    // 这样用户可以点击其他应用后，再点击 Dock 图标重新显示
   })
+
   onUnmounted(() => { unlistenEnter(); unlistenLeave(); unlistenFocus() })
 })
 </script>
@@ -676,6 +745,33 @@ onMounted(async () => {
 
 .chapter-back:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.chapter-group {
+  padding: 7px 14px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.chapter-group:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chapter-group-icon {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.chapter-subitem {
+  padding-left: 28px;
+  border-left: 2px solid rgba(255, 255, 255, 0.1);
+  margin-left: 8px;
+  margin-top: 2px;
 }
 
 .chapter-item {
