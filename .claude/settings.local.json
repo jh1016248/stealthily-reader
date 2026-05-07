@@ -16,7 +16,10 @@
       "Bash(chmod +x /Users/huangjianhong/.git/hooks/post-commit)",
       "Bash(npx claude-mem *)",
       "Read(//Users/huangjianhong/.claude/**)",
-      "Read(//Users/huangjianhong/**)"
+      "Read(//Users/huangjianhong/**)",
+      "Bash(awk '{print $6/1024 \" MB\"}')",
+      "Bash(sed -n '97,101p' /Volumes/ssd/work/john/github/attempt/stealthily-reader/src/views/LibraryView.vue)",
+      "Bash(sed -n '181,185p' /Volumes/ssd/work/john/github/attempt/stealthily-reader/src/views/ReadingView.vue)"
     ],
     "additionalDirectories": [
       "/Users/huangjianhong/.git",

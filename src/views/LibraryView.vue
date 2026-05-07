@@ -1,7 +1,7 @@
 <template>
   <div class="slack-off-container" :class="{ 'mouse-inside': isMouseInside }" :style="containerStyle"
     @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown">
+    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown($event)">
     <!-- 关闭按钮 -->
     <div class="btn-trigger btn-close-pos" @mousedown.stop>
       <button class="btn-action btn-close" @click="closeApp">x</button>
@@ -78,6 +78,7 @@ interface Book {
 }
 
 const isMouseInside = ref(false)
+const isDragging = ref(false)
 const bgColor = ref('#1a1a1a')
 const bgOpacity = ref(85)
 const textColor = ref('#e0e0e0')
@@ -90,12 +91,16 @@ const loadingText = ref('')
 const books = ref<Book[]>([])
 
 const onMouseEnter = () => { isMouseInside.value = true }
-const onMouseLeave = () => { isMouseInside.value = false }
+const onMouseLeave = () => { if (isDragging.value) return; isMouseInside.value = false }
 
 const appWindow = getCurrentWindow()
 
-const onContainerMouseDown = () => {
+const onContainerMouseDown = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  if (target.closest('.btn-trigger, .resize-handle, .book-card, .btn-delete, button, input, .float-panel')) return
+  isDragging.value = true
   appWindow.startDragging()
+  setTimeout(() => { isDragging.value = false }, 500)
 }
 
 const dirMap: Record<string, 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'> = {

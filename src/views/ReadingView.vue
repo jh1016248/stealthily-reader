@@ -1,7 +1,7 @@
 <template>
   <div class="slack-off-container" :class="{ 'mouse-inside': hideOnLeave ? isMouseInside : true }" :style="containerStyle"
     @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown" @click="onClickOutside">
+    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown($event)" @click="onClickOutside">
     <!-- 关闭按钮 -->
     <div class="btn-trigger btn-close-pos" @mousedown.stop @click.stop>
       <button class="btn-action btn-close" @click="backToLibrary">x</button>
@@ -70,20 +70,20 @@
 
     <!-- 章节列表 -->
     <div v-if="showChapterList" ref="chapterListRef" class="float-panel chapter-dropdown" @mousedown.stop @click.stop>
-      <div class="chapter-back" @click="backToLibrary">返回书架</div>
+      <div class="chapter-back" @click="backToLibrary" @mousedown.stop>返回书架</div>
       <template v-if="nestedChapters.length > 0">
         <template v-for="(item, idx) in nestedChapters" :key="idx">
-          <div v-if="item.subitems && item.subitems.length > 0" class="chapter-group" @click="toggleChapterGroup(idx)">
+          <div v-if="item.subitems && item.subitems.length > 0" class="chapter-group" @click="toggleChapterGroup(idx)" @mousedown.stop>
             <span class="chapter-group-icon">{{ item.expanded ? '▼' : '▶' }}</span>
             <span class="chapter-group-label">{{ item.label }}</span>
           </div>
           <div v-else-if="item.href" class="chapter-item" :class="{ active: isCurrentChapter(item.href) }"
-            @click="selectChapterByHref(item.href)">
+            @click="selectChapterByHref(item.href)" @mousedown.stop>
             {{ item.label }}
           </div>
           <template v-if="item.subitems && item.subitems.length > 0 && item.expanded">
             <div v-for="subitem in item.subitems" :key="subitem.href" class="chapter-item chapter-subitem"
-              :class="{ active: isCurrentChapter(subitem.href) }" @click="selectChapterByHref(subitem.href)">
+              :class="{ active: isCurrentChapter(subitem.href) }" @click="selectChapterByHref(subitem.href)" @mousedown.stop>
               {{ subitem.label }}
             </div>
           </template>
@@ -91,7 +91,7 @@
       </template>
       <template v-else>
         <div v-for="ch in chapters" :key="ch" class="chapter-item" :class="{ active: ch === currentChapterId }"
-          @click="selectChapter(ch)">
+          @click="selectChapter(ch)" @mousedown.stop>
           {{ ch.replace(/^\d+_/, '') }}
         </div>
       </template>
@@ -142,6 +142,7 @@ const bookId = computed(() => route.params.bookId as string)
 const contentRef = ref<HTMLElement | null>(null)
 const chapterListRef = ref<HTMLElement | null>(null)
 const isMouseInside = ref(false)
+const isDragging = ref(false)
 const showSettings = ref(false)
 const showChapterList = ref(false)
 const loading = ref(false)
@@ -169,7 +170,7 @@ const onMouseEnter = () => {
   isMouseInside.value = true
 }
 const onMouseLeave = () => {
-  if (showSettings.value || showChapterList.value) return
+  if (isDragging.value || showSettings.value || showChapterList.value) return
   isMouseInside.value = false
 }
 
@@ -178,8 +179,12 @@ const onClickOutside = () => {
   if (showChapterList.value) showChapterList.value = false
 }
 
-const onContainerMouseDown = () => {
+const onContainerMouseDown = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  if (target.closest('.btn-trigger, .resize-handle, .float-panel, button, input, select')) return
+  isDragging.value = true
   appWindow.startDragging()
+  setTimeout(() => { isDragging.value = false }, 500)
 }
 
 const dirMap: Record<string, 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'> = {
@@ -343,7 +348,13 @@ const trimBottomChapter = () => {
 
 const restoreProgress = async () => {
   const saved = await loadProgress()
-  if (!saved?.chapter || !chapters.value.includes(saved.chapter)) return
+  if (!saved?.chapter || !chapters.value.includes(saved.chapter)) {
+    // 新书或无进度，自动加载第一章
+    if (chapters.value.length > 0) {
+      await loadChapterWindow(chapters.value[0])
+    }
+    return
+  }
   await loadChapterWindow(saved.chapter)
   await nextTick()
   if (contentRef.value) {
@@ -447,6 +458,7 @@ watch(showChapterList, (val) => {
 onMounted(async () => {
   await loadSettings()
   await loadChapters()
+  if (chapters.value.length === 0) return
   await restoreProgress()
 
   const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
