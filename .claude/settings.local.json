@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E '\\\\.\\(ts|vue|js\\)$')",
+      "Bash(npx vue-tsc *)",
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx skills *)",
+      "Bash(git config *)",
+      "Bash(cargo check *)",
+      "Bash(npx tsc *)",
+      "Bash(open /Volumes/ssd/work/john/github/attempt/stealthily-reader/src-tauri/src/lib.rs)",
+      "Bash(git push *)",
+      "Bash(chmod +x /Users/huangjianhong/.git/hooks/prepare-commit-msg)",
+      "Bash(chmod +x /Users/huangjianhong/.git/hooks/post-commit)",
+      "Bash(npx claude-mem *)",
+      "Read(//Users/huangjianhong/.claude/**)",
+      "Read(//Users/huangjianhong/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/huangjianhong/.git",
+      "/Users/huangjianhong/.git/hooks",
+      "/private/tmp/test-github-hook"
+    ]
+  }
+}

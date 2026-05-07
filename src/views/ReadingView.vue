@@ -155,7 +155,7 @@ const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>
 const textSize = ref(16)
 const textColor = ref('#e0e0e0')
 const bgColor = ref('#1a1a1a')
-const bgOpacity = ref(85)
+const bgOpacity = ref(20)
 const hideOnLeave = ref(true)
 
 const colorPresets = ['#ffffff', '#e0e0e0', '#a0a0a0', '#666666', '#333333', '#000000']

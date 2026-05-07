@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "",
-        "width": 600,
-        "height": 800,
+        "width": 350,
+        "height": 400,
         "minWidth": 300,
-        "minHeight": 200,
+        "minHeight": 350,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
