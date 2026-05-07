@@ -1,7 +1,13 @@
 <template>
-  <div class="slack-off-container" :class="{ 'mouse-inside': hideOnLeave ? isMouseInside : true }" :style="containerStyle"
+  <div
+    class="slack-off-container"
+    :class="{ 'mouse-inside': hideOnLeave ? isMouseInside : true }"
+    :style="containerStyle"
     @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave" @mousedown="onContainerMouseDown($event)" @click="onClickOutside">
+    @mouseleave="onMouseLeave"
+    @mousedown="onContainerMouseDown($event)"
+    @click="onClickOutside"
+  >
     <!-- 关闭按钮 -->
     <div class="btn-trigger btn-close-pos" @mousedown.stop @click.stop>
       <button class="btn-action btn-close" @click="backToLibrary">x</button>
@@ -9,17 +15,34 @@
 
     <!-- 设置按钮 -->
     <div class="btn-trigger btn-settings-pos" @mousedown.stop @click.stop>
-      <button class="btn-action btn-settings" @click="showSettings = !showSettings; showChapterList = false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button
+        class="btn-action btn-settings"
+        @click="
+          showSettings = !showSettings;
+          showChapterList = false;
+        "
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
           <circle cx="12" cy="12" r="3" />
           <path
-            d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+          />
         </svg>
       </button>
     </div>
 
     <!-- 设置面板 -->
-    <div v-if="showSettings" class="float-panel settings-panel" @mousedown.stop @click.stop>
+    <div
+      v-if="showSettings"
+      class="float-panel settings-panel"
+      @mousedown.stop
+      @click.stop
+    >
       <div class="settings-row">
         <label>字号</label>
         <div class="size-controls">
@@ -31,28 +54,59 @@
       <div class="settings-row">
         <label>颜色</label>
         <div class="color-presets">
-          <div v-for="c in colorPresets" :key="c" class="color-dot" :style="{ background: c }"
-            :class="{ active: textColor === c }" @click="textColor = c"></div>
-          <input type="color" :value="textColor" @input="textColor = ($event.target as HTMLInputElement).value"
-            class="color-picker" />
+          <div
+            v-for="c in colorPresets"
+            :key="c"
+            class="color-dot"
+            :style="{ background: c }"
+            :class="{ active: textColor === c }"
+            @click="textColor = c"
+          ></div>
+          <input
+            type="color"
+            :value="textColor"
+            @input="textColor = ($event.target as HTMLInputElement).value"
+            class="color-picker"
+          />
         </div>
       </div>
       <div class="settings-row">
         <label>背景</label>
         <div class="color-presets">
-          <div v-for="c in bgPresets" :key="c" class="color-dot" :style="{ background: c }"
-            :class="{ active: bgColor === c }" @click="bgColor = c"></div>
-          <input type="color" :value="bgColor" @input="bgColor = ($event.target as HTMLInputElement).value"
-            class="color-picker" />
+          <div
+            v-for="c in bgPresets"
+            :key="c"
+            class="color-dot"
+            :style="{ background: c }"
+            :class="{ active: bgColor === c }"
+            @click="bgColor = c"
+          ></div>
+          <input
+            type="color"
+            :value="bgColor"
+            @input="bgColor = ($event.target as HTMLInputElement).value"
+            class="color-picker"
+          />
         </div>
       </div>
       <div class="settings-row">
         <label>透明度</label>
-        <input type="range" min="0" max="100" step="1" v-model.number="bgOpacity" class="opacity-slider" />
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          v-model.number="bgOpacity"
+          class="opacity-slider"
+        />
       </div>
       <div class="settings-row">
         <label>移出隐藏</label>
-        <div class="toggle-switch" :class="{ active: hideOnLeave }" @click="hideOnLeave = !hideOnLeave">
+        <div
+          class="toggle-switch"
+          :class="{ active: hideOnLeave }"
+          @click="hideOnLeave = !hideOnLeave"
+        >
           <div class="toggle-knob"></div>
         </div>
       </div>
@@ -60,52 +114,123 @@
 
     <!-- 章节选择图标 -->
     <div class="btn-trigger btn-chapter-pos" @mousedown.stop @click.stop>
-      <button class="btn-action btn-chapter" @click="showChapterList = !showChapterList; showSettings = false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button
+        class="btn-action btn-chapter"
+        @click="
+          showChapterList = !showChapterList;
+          showSettings = false;
+        "
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          <path
+            d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+          />
         </svg>
       </button>
     </div>
 
     <!-- 章节列表 -->
-    <div v-if="showChapterList" ref="chapterListRef" class="float-panel chapter-dropdown" @mousedown.stop @click.stop>
-      <div class="chapter-back" @click="backToLibrary" @mousedown.stop>返回书架</div>
+    <div
+      v-if="showChapterList"
+      ref="chapterListRef"
+      class="float-panel chapter-dropdown"
+      @mousedown.stop
+      @click.stop
+    >
+      <div class="chapter-back" @click="backToLibrary" @mousedown.stop>
+        返回书架
+      </div>
       <template v-if="nestedChapters.length > 0">
         <template v-for="(item, idx) in nestedChapters" :key="idx">
-          <div v-if="item.subitems && item.subitems.length > 0" class="chapter-group" @click="toggleChapterGroup(idx)" @mousedown.stop>
-            <span class="chapter-group-icon">{{ item.expanded ? '▼' : '▶' }}</span>
+          <div
+            v-if="item.subitems && item.subitems.length > 0"
+            class="chapter-group"
+            @click="toggleChapterGroup(idx)"
+            @mousedown.stop
+          >
+            <span class="chapter-group-icon">{{
+              item.expanded ? "▼" : "▶"
+            }}</span>
             <span class="chapter-group-label">{{ item.label }}</span>
           </div>
-          <div v-else-if="item.href" class="chapter-item" :class="{ active: isCurrentChapter(item.href) }"
-            @click="selectChapterByHref(item.href)" @mousedown.stop>
+          <div
+            v-else-if="item.href"
+            class="chapter-item"
+            :class="{ active: isCurrentChapter(item.href) }"
+            @click="selectChapterByHref(item.href)"
+            @mousedown.stop
+          >
             {{ item.label }}
           </div>
-          <template v-if="item.subitems && item.subitems.length > 0 && item.expanded">
-            <div v-for="subitem in item.subitems" :key="subitem.href" class="chapter-item chapter-subitem"
-              :class="{ active: isCurrentChapter(subitem.href) }" @click="selectChapterByHref(subitem.href)" @mousedown.stop>
+          <template
+            v-if="item.subitems && item.subitems.length > 0 && item.expanded"
+          >
+            <div
+              v-for="subitem in item.subitems"
+              :key="subitem.href"
+              class="chapter-item chapter-subitem"
+              :class="{ active: isCurrentChapter(subitem.href) }"
+              @click="selectChapterByHref(subitem.href)"
+              @mousedown.stop
+            >
               {{ subitem.label }}
             </div>
           </template>
         </template>
       </template>
       <template v-else>
-        <div v-for="ch in chapters" :key="ch" class="chapter-item" :class="{ active: ch === currentChapterId }"
-          @click="selectChapter(ch)" @mousedown.stop>
-          {{ ch.replace(/^\d+_/, '') }}
+        <div
+          v-for="ch in chapters"
+          :key="ch"
+          class="chapter-item"
+          :class="{ active: ch === currentChapterId }"
+          @click="selectChapter(ch)"
+          @mousedown.stop
+        >
+          {{ ch.replace(/^\d+_/, "") }}
         </div>
       </template>
     </div>
 
     <!-- 缩放手柄 -->
-    <div class="resize-handle resize-n" @mousedown.stop.prevent="startResize('n')"></div>
-    <div class="resize-handle resize-s" @mousedown.stop.prevent="startResize('s')"></div>
-    <div class="resize-handle resize-e" @mousedown.stop.prevent="startResize('e')"></div>
-    <div class="resize-handle resize-w" @mousedown.stop.prevent="startResize('w')"></div>
-    <div class="resize-handle resize-ne" @mousedown.stop.prevent="startResize('ne')"></div>
-    <div class="resize-handle resize-nw" @mousedown.stop.prevent="startResize('nw')"></div>
-    <div class="resize-handle resize-se" @mousedown.stop.prevent="startResize('se')"></div>
-    <div class="resize-handle resize-sw" @mousedown.stop.prevent="startResize('sw')"></div>
+    <div
+      class="resize-handle resize-n"
+      @mousedown.stop.prevent="startResize('n')"
+    ></div>
+    <div
+      class="resize-handle resize-s"
+      @mousedown.stop.prevent="startResize('s')"
+    ></div>
+    <div
+      class="resize-handle resize-e"
+      @mousedown.stop.prevent="startResize('e')"
+    ></div>
+    <div
+      class="resize-handle resize-w"
+      @mousedown.stop.prevent="startResize('w')"
+    ></div>
+    <div
+      class="resize-handle resize-ne"
+      @mousedown.stop.prevent="startResize('ne')"
+    ></div>
+    <div
+      class="resize-handle resize-nw"
+      @mousedown.stop.prevent="startResize('nw')"
+    ></div>
+    <div
+      class="resize-handle resize-se"
+      @mousedown.stop.prevent="startResize('se')"
+    ></div>
+    <div
+      class="resize-handle resize-sw"
+      @mousedown.stop.prevent="startResize('sw')"
+    ></div>
 
     <!-- 内容区域 -->
     <div class="content-area" ref="contentRef" @scroll="onScroll">
@@ -113,10 +238,23 @@
         <div v-if="loading" class="loading">加载中...</div>
         <template v-else>
           <div v-if="loadingPrev" class="loading-prev">加载上一章...</div>
-          <div v-for="chapter in chapterBlocks" :key="chapter.id" :data-chapter="chapter.id">
-            <div class="chapter-title" :style="{ color: textColor, fontSize: (textSize + 2) + 'px' }">{{ chapter.title }}</div>
-            <div v-for="(block, bidx) in chapter.blocks" :key="bidx" class="text-block"
-              :style="{ color: textColor, fontSize: textSize + 'px' }">
+          <div
+            v-for="chapter in chapterBlocks"
+            :key="chapter.id"
+            :data-chapter="chapter.id"
+          >
+            <div
+              class="chapter-title"
+              :style="{ color: textColor, fontSize: textSize + 2 + 'px' }"
+            >
+              {{ chapter.title }}
+            </div>
+            <div
+              v-for="(block, bidx) in chapter.blocks"
+              :key="bidx"
+              class="text-block"
+              :style="{ color: textColor, fontSize: textSize + 'px' }"
+            >
               {{ block }}
             </div>
           </div>
@@ -128,102 +266,156 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { listen } from '@tauri-apps/api/event'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 
-const route = useRoute()
-const router = useRouter()
-const appWindow = getCurrentWindow()
-const bookId = computed(() => route.params.bookId as string)
+const route = useRoute();
+const router = useRouter();
+const appWindow = getCurrentWindow();
+const bookId = computed(() => route.params.bookId as string);
 
-const contentRef = ref<HTMLElement | null>(null)
-const chapterListRef = ref<HTMLElement | null>(null)
-const isMouseInside = ref(false)
-const isDragging = ref(false)
-const showSettings = ref(false)
-const showChapterList = ref(false)
-const loading = ref(false)
-const loadingNext = ref(false)
-const loadingPrev = ref(false)
-const chapters = ref<string[]>([])
-const currentChapterId = ref('')
-const nestedChapters = ref<Array<{ label: string; href?: string; subitems?: any[]; expanded?: boolean }>>([])
-const hrefToIndex = ref<Record<string, number>>({})
-const chapterBlocks = ref<Array<{ id: string; title: string; blocks: string[] }>>([])
-const textSize = ref(16)
-const textColor = ref('#e0e0e0')
-const bgColor = ref('#1a1a1a')
-const bgOpacity = ref(20)
-const hideOnLeave = ref(true)
+const contentRef = ref<HTMLElement | null>(null);
+const chapterListRef = ref<HTMLElement | null>(null);
+const isMouseInside = ref(false);
+const isDragging = ref(false);
+const showSettings = ref(false);
+const showChapterList = ref(false);
+const loading = ref(false);
+const loadingNext = ref(false);
+const loadingPrev = ref(false);
+const chapters = ref<string[]>([]);
+const currentChapterId = ref("");
+const nestedChapters = ref<
+  Array<{ label: string; href?: string; subitems?: any[]; expanded?: boolean }>
+>([]);
+const hrefToIndex = ref<Record<string, number>>({});
+const chapterBlocks = ref<
+  Array<{ id: string; title: string; blocks: string[] }>
+>([]);
+const textSize = ref(16);
+const textColor = ref("#e0e0e0");
+const bgColor = ref("#1a1a1a");
+const bgOpacity = ref(20);
+const hideOnLeave = ref(true);
 
-const colorPresets = ['#ffffff', '#e0e0e0', '#a0a0a0', '#666666', '#333333', '#000000']
-const bgPresets = ['#ffffff', '#000000', '#1a1a1a', '#2c3e50', '#1e3a2f', '#3b1f1f', '#1f1f3b']
+const colorPresets = [
+  "#ffffff",
+  "#e0e0e0",
+  "#a0a0a0",
+  "#666666",
+  "#333333",
+  "#000000",
+];
+const bgPresets = [
+  "#ffffff",
+  "#000000",
+  "#1a1a1a",
+  "#2c3e50",
+  "#1e3a2f",
+  "#3b1f1f",
+  "#1f1f3b",
+];
 
 const containerStyle = computed(() => ({
-  background: bgColor.value + Math.round(bgOpacity.value * 2.55).toString(16).padStart(2, '0'),
-}))
+  background:
+    bgColor.value +
+    Math.round(bgOpacity.value * 2.55)
+      .toString(16)
+      .padStart(2, "0"),
+}));
 
 const onMouseEnter = () => {
-  isMouseInside.value = true
-}
+  isMouseInside.value = true;
+};
 const onMouseLeave = () => {
-  if (isDragging.value || showSettings.value || showChapterList.value) return
-  isMouseInside.value = false
-}
+  if (isDragging.value || showSettings.value || showChapterList.value) return;
+  isMouseInside.value = false;
+};
 
 const onClickOutside = () => {
-  if (showSettings.value) showSettings.value = false
-  if (showChapterList.value) showChapterList.value = false
-}
+  if (showSettings.value) showSettings.value = false;
+  if (showChapterList.value) showChapterList.value = false;
+};
 
 const onContainerMouseDown = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  if (target.closest('.btn-trigger, .resize-handle, .float-panel, button, input, select')) return
-  isDragging.value = true
-  appWindow.startDragging()
-  setTimeout(() => { isDragging.value = false }, 500)
-}
+  const target = e.target as HTMLElement;
+  if (
+    target.closest(
+      ".btn-trigger, .resize-handle, .float-panel, button, input, select",
+    )
+  )
+    return;
+  isDragging.value = true;
+  appWindow.startDragging();
+  setTimeout(() => {
+    isDragging.value = false;
+  }, 500);
+};
 
-const dirMap: Record<string, 'North' | 'South' | 'East' | 'West' | 'NorthEast' | 'NorthWest' | 'SouthEast' | 'SouthWest'> = {
-  n: 'North', s: 'South', e: 'East', w: 'West',
-  ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest',
-}
+const dirMap: Record<
+  string,
+  | "North"
+  | "South"
+  | "East"
+  | "West"
+  | "NorthEast"
+  | "NorthWest"
+  | "SouthEast"
+  | "SouthWest"
+> = {
+  n: "North",
+  s: "South",
+  e: "East",
+  w: "West",
+  ne: "NorthEast",
+  nw: "NorthWest",
+  se: "SouthEast",
+  sw: "SouthWest",
+};
 
 const startResize = (direction: string) => {
-  appWindow.startResizeDragging(dirMap[direction])
-}
+  appWindow.startResizeDragging(dirMap[direction]);
+};
 
 // 保存/加载进度（scroll 为相对于当前章节 div 顶部的偏移）
 const saveProgress = async () => {
   try {
-    const readingChapterId = deriveCurrentChapterId()
-    const chapterEl = contentRef.value?.querySelector(`[data-chapter="${readingChapterId}"]`) as HTMLElement | null
-    const scroll = chapterEl ? (contentRef.value!.scrollTop - chapterEl.offsetTop) : 0
-    const progress = await invoke<{ entries: Record<string, any> }>('load_progress')
+    const readingChapterId = deriveCurrentChapterId();
+    const chapterEl = contentRef.value?.querySelector(
+      `[data-chapter="${readingChapterId}"]`,
+    ) as HTMLElement | null;
+    const scroll = chapterEl
+      ? contentRef.value!.scrollTop - chapterEl.offsetTop
+      : 0;
+    const progress = await invoke<{ entries: Record<string, any> }>(
+      "load_progress",
+    );
     progress.entries[bookId.value] = {
       chapter: readingChapterId,
       scroll: Math.max(0, scroll),
-    }
-    await invoke('save_progress', { progress })
+    };
+    await invoke("save_progress", { progress });
   } catch {}
-}
+};
 
 const loadProgress = async () => {
   try {
-    const progress = await invoke<{ entries: Record<string, { chapter: string; scroll: number }> }>('load_progress')
-    return progress.entries[bookId.value] || null
+    const progress = await invoke<{
+      entries: Record<string, { chapter: string; scroll: number }>;
+    }>("load_progress");
+    return progress.entries[bookId.value] || null;
   } catch {
-    return null
+    return null;
   }
-}
+};
 
 // 保存设置
 const saveSettings = async () => {
   try {
-    await invoke('save_settings', {
+    await invoke("save_settings", {
       settings: {
         font_size: textSize.value,
         text_color: textColor.value,
@@ -231,252 +423,286 @@ const saveSettings = async () => {
         bg_opacity: bgOpacity.value,
         hide_on_leave: hideOnLeave.value,
       },
-    })
+    });
   } catch {}
-}
+};
 
 const loadSettings = async () => {
   try {
-    const settings = await invoke<any>('load_settings')
-    if (settings?.font_size) textSize.value = settings.font_size
-    if (settings?.text_color) textColor.value = settings.text_color
-    if (settings?.bg_color) bgColor.value = settings.bg_color
-    if (settings?.bg_opacity !== undefined) bgOpacity.value = settings.bg_opacity
-    if (settings?.hide_on_leave !== undefined) hideOnLeave.value = settings.hide_on_leave
+    const settings = await invoke<any>("load_settings");
+    if (settings?.font_size) textSize.value = settings.font_size;
+    if (settings?.text_color) textColor.value = settings.text_color;
+    if (settings?.bg_color) bgColor.value = settings.bg_color;
+    if (settings?.bg_opacity !== undefined)
+      bgOpacity.value = settings.bg_opacity;
+    if (settings?.hide_on_leave !== undefined)
+      hideOnLeave.value = settings.hide_on_leave;
   } catch {}
-}
+};
 
 const loadChapters = async () => {
-  chapters.value = await invoke('list_chapters', { bookId: bookId.value })
+  chapters.value = await invoke("list_chapters", { bookId: bookId.value });
   // Load nested TOC for chapter list UI
   try {
-    const toc = await invoke<string | null>('load_toc', { bookId: bookId.value })
+    const toc = await invoke<string | null>("load_toc", {
+      bookId: bookId.value,
+    });
     if (toc) {
-      const tocData = JSON.parse(toc)
-      nestedChapters.value = tocData.nested || []
-      hrefToIndex.value = tocData.hrefToIndex || {}
+      const tocData = JSON.parse(toc);
+      nestedChapters.value = tocData.nested || [];
+      hrefToIndex.value = tocData.hrefToIndex || {};
     } else {
       // Fallback: create flat structure from chapter IDs
-      nestedChapters.value = chapters.value.map(ch => ({ label: ch.replace(/^\d+_/, ''), href: ch }))
+      nestedChapters.value = chapters.value.map((ch) => ({
+        label: ch.replace(/^\d+_/, ""),
+        href: ch,
+      }));
     }
   } catch {
-    nestedChapters.value = chapters.value.map(ch => ({ label: ch.replace(/^\d+_/, ''), href: ch }))
+    nestedChapters.value = chapters.value.map((ch) => ({
+      label: ch.replace(/^\d+_/, ""),
+      href: ch,
+    }));
   }
-}
+};
 
 const toggleChapterGroup = (index: number) => {
   if (nestedChapters.value[index]) {
-    nestedChapters.value[index].expanded = !nestedChapters.value[index].expanded
+    nestedChapters.value[index].expanded =
+      !nestedChapters.value[index].expanded;
   }
-}
+};
 
 const selectChapterByHref = (href: string) => {
   // Find the chapter by href using the index mapping
-  const hrefBase = href.split('#')[0]
-  const chapterIndex = hrefToIndex.value[hrefBase]
+  const hrefBase = href.split("#")[0];
+  const chapterIndex = hrefToIndex.value[hrefBase];
   if (chapterIndex !== undefined && chapterIndex < chapters.value.length) {
-    selectChapter(chapters.value[chapterIndex])
+    selectChapter(chapters.value[chapterIndex]);
   }
-}
+};
 
 const isCurrentChapter = (href: string): boolean => {
-  const hrefBase = href.split('#')[0]
-  const chapterIndex = hrefToIndex.value[hrefBase]
+  const hrefBase = href.split("#")[0];
+  const chapterIndex = hrefToIndex.value[hrefBase];
   if (chapterIndex !== undefined && chapterIndex < chapters.value.length) {
-    return chapters.value[chapterIndex] === currentChapterId.value
+    return chapters.value[chapterIndex] === currentChapterId.value;
   }
-  return false
-}
+  return false;
+};
 
 const fetchChapterData = async (chapterId: string) => {
-  const content = await invoke<string>('read_chapter', { bookId: bookId.value, chapterId })
-  const blocks = content.split('\n').filter(line => line.trim())
-  const title = chapterId.replace(/^\d+_/, '')
-  return { id: chapterId, title, blocks }
-}
+  const content = await invoke<string>("read_chapter", {
+    bookId: bookId.value,
+    chapterId,
+  });
+  const blocks = content.split("\n").filter((line) => line.trim());
+  const title = chapterId.replace(/^\d+_/, "");
+  return { id: chapterId, title, blocks };
+};
 
 const deriveCurrentChapterId = (): string => {
-  if (!contentRef.value) return currentChapterId.value
-  const scrollTop = contentRef.value.scrollTop
-  let detectedId = chapterBlocks.value[0]?.id || ''
+  if (!contentRef.value) return currentChapterId.value;
+  const scrollTop = contentRef.value.scrollTop;
+  let detectedId = chapterBlocks.value[0]?.id || "";
   for (const chapter of chapterBlocks.value) {
-    const el = contentRef.value.querySelector(`[data-chapter="${chapter.id}"]`) as HTMLElement | null
-    if (el && el.offsetTop <= scrollTop) detectedId = chapter.id
+    const el = contentRef.value.querySelector(
+      `[data-chapter="${chapter.id}"]`,
+    ) as HTMLElement | null;
+    if (el && el.offsetTop <= scrollTop) detectedId = chapter.id;
   }
-  return detectedId
-}
+  return detectedId;
+};
 
 const getWindowChapterIds = (centerChapterId: string): string[] => {
-  const idx = chapters.value.findIndex(c => c === centerChapterId)
-  if (idx < 0) return [centerChapterId]
-  const ids: string[] = []
-  if (idx > 0) ids.push(chapters.value[idx - 1])
-  ids.push(chapters.value[idx])
-  if (idx < chapters.value.length - 1) ids.push(chapters.value[idx + 1])
-  return ids
-}
+  const idx = chapters.value.findIndex((c) => c === centerChapterId);
+  if (idx < 0) return [centerChapterId];
+  const ids: string[] = [];
+  if (idx > 0) ids.push(chapters.value[idx - 1]);
+  ids.push(chapters.value[idx]);
+  if (idx < chapters.value.length - 1) ids.push(chapters.value[idx + 1]);
+  return ids;
+};
 
 const loadChapterWindow = async (centerChapterId: string) => {
-  loading.value = true
-  const windowIds = getWindowChapterIds(centerChapterId)
-  const results = await Promise.all(windowIds.map(id => fetchChapterData(id)))
-  chapterBlocks.value = results
-  currentChapterId.value = centerChapterId
-  loading.value = false
-  saveProgress()
-}
+  loading.value = true;
+  const windowIds = getWindowChapterIds(centerChapterId);
+  const results = await Promise.all(
+    windowIds.map((id) => fetchChapterData(id)),
+  );
+  chapterBlocks.value = results;
+  currentChapterId.value = centerChapterId;
+  loading.value = false;
+  saveProgress();
+};
 
 const trimTopChapter = async () => {
-  if (chapterBlocks.value.length <= 3) return
-  const removedId = chapterBlocks.value[0].id
-  const el = contentRef.value?.querySelector(`[data-chapter="${removedId}"]`) as HTMLElement | null
-  const removedHeight = el?.offsetHeight || 0
-  const scrollTopBefore = contentRef.value?.scrollTop || 0
-  chapterBlocks.value.shift()
+  if (chapterBlocks.value.length <= 3) return;
+  const removedId = chapterBlocks.value[0].id;
+  const el = contentRef.value?.querySelector(
+    `[data-chapter="${removedId}"]`,
+  ) as HTMLElement | null;
+  const removedHeight = el?.offsetHeight || 0;
+  const scrollTopBefore = contentRef.value?.scrollTop || 0;
+  chapterBlocks.value.shift();
   if (removedHeight > 0 && scrollTopBefore > removedHeight) {
-    await nextTick()
+    await nextTick();
     if (contentRef.value) {
-      contentRef.value.scrollTop = scrollTopBefore - removedHeight
+      contentRef.value.scrollTop = scrollTopBefore - removedHeight;
     }
   }
-}
+};
 
 const trimBottomChapter = () => {
-  if (chapterBlocks.value.length <= 3) return
-  chapterBlocks.value.pop()
-}
+  if (chapterBlocks.value.length <= 3) return;
+  chapterBlocks.value.pop();
+};
 
 const restoreProgress = async () => {
-  const saved = await loadProgress()
+  const saved = await loadProgress();
   if (!saved?.chapter || !chapters.value.includes(saved.chapter)) {
     // 新书或无进度，自动加载第一章
     if (chapters.value.length > 0) {
-      await loadChapterWindow(chapters.value[0])
+      await loadChapterWindow(chapters.value[0]);
     }
-    return
+    return;
   }
-  await loadChapterWindow(saved.chapter)
-  await nextTick()
+  await loadChapterWindow(saved.chapter);
+  await nextTick();
   if (contentRef.value) {
-    const chapterEl = contentRef.value.querySelector(`[data-chapter="${saved.chapter}"]`) as HTMLElement | null
+    const chapterEl = contentRef.value.querySelector(
+      `[data-chapter="${saved.chapter}"]`,
+    ) as HTMLElement | null;
     if (chapterEl) {
-      contentRef.value.scrollTop = chapterEl.offsetTop + (saved.scroll || 0)
+      contentRef.value.scrollTop = chapterEl.offsetTop + (saved.scroll || 0);
     }
   }
-}
+};
 
 const selectChapter = async (chapterId: string) => {
-  showChapterList.value = false
-  await loadChapterWindow(chapterId)
-  await nextTick()
+  showChapterList.value = false;
+  await loadChapterWindow(chapterId);
+  await nextTick();
   if (contentRef.value) {
-    const chapterEl = contentRef.value.querySelector(`[data-chapter="${chapterId}"]`) as HTMLElement | null
+    const chapterEl = contentRef.value.querySelector(
+      `[data-chapter="${chapterId}"]`,
+    ) as HTMLElement | null;
     if (chapterEl) {
-      contentRef.value.scrollTop = chapterEl.offsetTop
+      contentRef.value.scrollTop = chapterEl.offsetTop;
     }
   }
-}
+};
 
-let scrollTimer: ReturnType<typeof setTimeout> | null = null
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const onScroll = () => {
-  if (!contentRef.value || loading.value) return
-  const { scrollTop, scrollHeight, clientHeight } = contentRef.value
+  if (!contentRef.value || loading.value) return;
+  const { scrollTop, scrollHeight, clientHeight } = contentRef.value;
 
-  currentChapterId.value = deriveCurrentChapterId()
+  currentChapterId.value = deriveCurrentChapterId();
 
   if (scrollTop < 50 && !loadingPrev.value) {
-    loadPreviousChapter()
+    loadPreviousChapter();
   }
   if (scrollHeight - scrollTop - clientHeight < 50 && !loadingNext.value) {
-    loadNextChapter()
+    loadNextChapter();
   }
 
-  if (scrollTimer) clearTimeout(scrollTimer)
-  scrollTimer = setTimeout(() => saveProgress(), 300)
-}
+  if (scrollTimer) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => saveProgress(), 300);
+};
 
 const loadNextChapter = async () => {
-  const lastBlock = chapterBlocks.value[chapterBlocks.value.length - 1]
-  if (!lastBlock) return
-  const lastIdx = chapters.value.findIndex(c => c === lastBlock.id)
-  if (lastIdx < 0 || lastIdx >= chapters.value.length - 1) return
-  if (loadingNext.value) return
+  const lastBlock = chapterBlocks.value[chapterBlocks.value.length - 1];
+  if (!lastBlock) return;
+  const lastIdx = chapters.value.findIndex((c) => c === lastBlock.id);
+  if (lastIdx < 0 || lastIdx >= chapters.value.length - 1) return;
+  if (loadingNext.value) return;
 
-  loadingNext.value = true
-  const nextChapterId = chapters.value[lastIdx + 1]
-  const data = await fetchChapterData(nextChapterId)
-  if (data) chapterBlocks.value.push(data)
-  await nextTick()
-  await trimTopChapter()
-  saveProgress()
-  loadingNext.value = false
-}
+  loadingNext.value = true;
+  const nextChapterId = chapters.value[lastIdx + 1];
+  const data = await fetchChapterData(nextChapterId);
+  if (data) chapterBlocks.value.push(data);
+  await nextTick();
+  await trimTopChapter();
+  saveProgress();
+  loadingNext.value = false;
+};
 
 const loadPreviousChapter = async () => {
-  const firstBlock = chapterBlocks.value[0]
-  if (!firstBlock) return
-  const firstIdx = chapters.value.findIndex(c => c === firstBlock.id)
-  if (firstIdx <= 0) return
-  if (loadingPrev.value) return
+  const firstBlock = chapterBlocks.value[0];
+  if (!firstBlock) return;
+  const firstIdx = chapters.value.findIndex((c) => c === firstBlock.id);
+  if (firstIdx <= 0) return;
+  if (loadingPrev.value) return;
 
-  loadingPrev.value = true
-  const prevChapterId = chapters.value[firstIdx - 1]
-  const scrollTopBefore = contentRef.value?.scrollTop || 0
+  loadingPrev.value = true;
+  const prevChapterId = chapters.value[firstIdx - 1];
+  const scrollTopBefore = contentRef.value?.scrollTop || 0;
 
-  const data = await fetchChapterData(prevChapterId)
-  if (data) chapterBlocks.value.unshift(data)
-  await nextTick()
+  const data = await fetchChapterData(prevChapterId);
+  if (data) chapterBlocks.value.unshift(data);
+  await nextTick();
 
-  const newEl = contentRef.value?.querySelector(`[data-chapter="${prevChapterId}"]`) as HTMLElement | null
+  const newEl = contentRef.value?.querySelector(
+    `[data-chapter="${prevChapterId}"]`,
+  ) as HTMLElement | null;
   if (newEl && contentRef.value) {
-    contentRef.value.scrollTop = scrollTopBefore + newEl.offsetHeight
+    contentRef.value.scrollTop = scrollTopBefore + newEl.offsetHeight;
   }
 
-  trimBottomChapter()
-  saveProgress()
-  loadingPrev.value = false
-}
+  trimBottomChapter();
+  saveProgress();
+  loadingPrev.value = false;
+};
 
 const backToLibrary = () => {
-  router.push('/')
-}
+  router.push("/");
+};
 
 // Auto-save settings on change
-watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave], saveSettings)
+watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave], saveSettings);
 
 // 打开章节列表时自动滚到当前章节
 watch(showChapterList, (val) => {
   if (val) {
     setTimeout(() => {
-      const active = chapterListRef.value?.querySelector('.chapter-item.active')
-      active?.scrollIntoView({ block: 'center' })
-    }, 50)
+      const active = chapterListRef.value?.querySelector(
+        ".chapter-item.active",
+      );
+      active?.scrollIntoView({ block: "center" });
+    }, 50);
   }
-})
+});
 
 onMounted(async () => {
-  await loadSettings()
-  await loadChapters()
-  if (chapters.value.length === 0) return
-  await restoreProgress()
+  await loadSettings();
+  await loadChapters();
+  if (chapters.value.length === 0) return;
+  await restoreProgress();
 
-  const unlistenEnter = await listen('cursor-enter', () => onMouseEnter())
-  const unlistenLeave = await listen('cursor-leave', () => onMouseLeave())
+  const unlistenEnter = await listen("cursor-enter", () => onMouseEnter());
+  const unlistenLeave = await listen("cursor-leave", () => onMouseLeave());
 
   // 监听窗口焦点变化
   // 当 Dock 图标被点击激活窗口时显示内容
-  const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
-    if (focused) {
-      // 窗口获得焦点（ Dock 点击激活）
-      isMouseInside.value = true
-    }
-    // 注意：窗口失去焦点时不再自动隐藏内容
-    // 这样用户可以点击其他应用后，再点击 Dock 图标重新显示
-  })
+  const unlistenFocus = await appWindow.onFocusChanged(
+    ({ payload: focused }) => {
+      if (focused) {
+        // 窗口获得焦点（ Dock 点击激活）
+        isMouseInside.value = true;
+      }
+      // 注意：窗口失去焦点时不再自动隐藏内容
+      // 这样用户可以点击其他应用后，再点击 Dock 图标重新显示
+    },
+  );
 
-  onUnmounted(() => { unlistenEnter(); unlistenLeave(); unlistenFocus() })
-})
+  onUnmounted(() => {
+    unlistenEnter();
+    unlistenLeave();
+    unlistenFocus();
+  });
+});
 </script>
 
 <style scoped>
@@ -503,7 +729,7 @@ onMounted(async () => {
 }
 
 .btn-trigger::after {
-  content: '';
+  content: "";
   position: absolute;
   width: 16px;
   height: 1px;
@@ -810,7 +1036,7 @@ onMounted(async () => {
   flex: 1;
   overflow-y: scroll;
   overflow-x: hidden;
-  padding: 40px 32px 50px;
+  padding: 40px 20px;
   opacity: 0;
   transition: opacity 0.15s;
   scrollbar-width: none;
@@ -858,12 +1084,60 @@ onMounted(async () => {
   z-index: 30;
 }
 
-.resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
-.resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
-.resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
-.resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
-.resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
-.resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
-.resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
-.resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+.resize-n {
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: n-resize;
+}
+.resize-s {
+  bottom: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: s-resize;
+}
+.resize-e {
+  right: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: e-resize;
+}
+.resize-w {
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: w-resize;
+}
+.resize-ne {
+  top: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: ne-resize;
+}
+.resize-nw {
+  top: -3px;
+  left: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: nw-resize;
+}
+.resize-se {
+  bottom: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+}
+.resize-sw {
+  bottom: -3px;
+  left: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: sw-resize;
+}
 </style>
