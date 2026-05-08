@@ -146,7 +146,7 @@ fn list_chapters(app: tauri::AppHandle, book_id: String) -> Result<Vec<String>, 
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
 
-    chapters.sort();
+    chapters.sort_by(|a, b| alphanumeric_sort::compare_str(a, b));
     Ok(chapters)
 }
 
