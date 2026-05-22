@@ -12,7 +12,7 @@ fn books_dir(app: &tauri::AppHandle) -> PathBuf {
     app_data_dir(app).join("books")
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct BookMetadata {
     id: String,
     title: String,
@@ -75,32 +75,72 @@ fn read_file_binary(path: String) -> Result<tauri::ipc::Response, String> {
 #[command]
 fn list_books(app: tauri::AppHandle) -> Result<Vec<BookMetadata>, String> {
     let dir = books_dir(&app);
+    println!("[Rust] list_books: scanning directory: {:?}", dir);
+
     if !dir.exists() {
+        println!("[Rust] books directory does not exist");
         return Ok(vec![]);
     }
 
     let mut books = vec![];
     let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
     for entry in entries.flatten() {
+        let book_dir = entry.path();
+        println!("[Rust] Found directory: {:?}", book_dir);
+
         if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             continue;
         }
-        let meta_path = entry.path().join("book.json");
-        if let Ok(content) = fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<BookMetadata>(&content) {
-                books.push(meta);
+
+        // 检查是否有 book.json 或者 epub 文件
+        let has_book_json = book_dir.join("book.json").exists();
+        let has_epub = book_dir.with_extension("epub").exists();
+        println!("[Rust] has_book_json: {}, has_epub: {}", has_book_json, has_epub);
+
+        if has_book_json || has_epub {
+            // 如果有 book.json，读取它
+            if let Ok(content) = fs::read_to_string(book_dir.join("book.json")) {
+                println!("[Rust] Reading book.json from: {:?}", book_dir.join("book.json"));
+                if let Ok(meta) = serde_json::from_str::<BookMetadata>(&content) {
+                    println!("[Rust] Loaded book metadata: {:?}", meta);
+                    books.push(meta);
+                    continue;
+                } else {
+                    println!("[Rust] Failed to parse book.json");
+                }
+            }
+
+            // 如果没有 book.json 但有 epub 文件，创建元数据
+            if has_epub {
+                if let Some(file_name) = book_dir.file_name().and_then(|n| n.to_str()) {
+                    println!("[Rust] Creating metadata for EPUB: {}", file_name);
+                    // 从目录名创建一个基本的元数据
+                    let metadata = BookMetadata {
+                        id: file_name.to_string(),
+                        title: file_name.replace('_', " ").replace(".epub", ""),
+                        author: "未知作者".to_string(),
+                        language: "zh".to_string(),
+                        created_at: chrono::Local::now().to_rfc3339(),
+                    };
+                    books.push(metadata);
+                }
             }
         }
     }
+    println!("[Rust] Total books found: {}", books.len());
     Ok(books)
 }
 
 #[command]
 fn save_book(app: tauri::AppHandle, metadata: BookMetadata) -> Result<(), String> {
+    println!("[Rust] save_book: saving book with id: {}", metadata.id);
     let book_dir = books_dir(&app).join(&metadata.id);
+    println!("[Rust] Creating book directory: {:?}", book_dir);
     fs::create_dir_all(book_dir.join("chapters")).map_err(|e| e.to_string())?;
     let content = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
-    fs::write(book_dir.join("book.json"), content).map_err(|e| e.to_string())
+    let book_json_path = book_dir.join("book.json");
+    println!("[Rust] Writing book.json to: {:?}", book_json_path);
+    fs::write(book_json_path, content).map_err(|e| e.to_string())
 }
 
 #[command]
@@ -209,8 +249,20 @@ fn load_progress(app: tauri::AppHandle) -> Result<Progress, String> {
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
+#[command]
+fn debug_log(message: String) -> Result<(), String> {
+    println!("[Rust Debug] {}", message);
+    Ok(())
+}
+
+#[command]
+fn save_epub_file(app: tauri::AppHandle, book_id: String, epub_buffer: Vec<u8>) -> Result<(), String> {
+    let epub_path = books_dir(&app).join(&book_id).with_extension("epub");
+    println!("[Rust] save_epub_file: saving {} bytes to {:?}", epub_buffer.len(), epub_path);
+    fs::write(epub_path, epub_buffer).map_err(|e| e.to_string())
+}
+
 use std::sync::OnceLock;
-use tauri::Emitter;
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
@@ -394,6 +446,8 @@ pub fn run() {
             load_settings,
             save_progress,
             load_progress,
+            save_epub_file,
+            debug_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

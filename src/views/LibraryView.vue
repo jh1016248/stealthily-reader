@@ -64,7 +64,8 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 import { parseEpubFile, generateChapterId } from '@/lib/epub-parser'
-import { parseTxtFile } from '@/lib/txt-parser'
+import { parseTxtFile, buildToc } from '@/lib/txt-parser'
+import { txtToEpub } from '@/lib/txt-to-epub'
 import { listen } from '@tauri-apps/api/event'
 
 const router = useRouter()
@@ -113,69 +114,149 @@ const startResize = (direction: string) => {
 }
 
 const loadBooks = async () => {
-  books.value = await invoke('list_books')
+  console.log('[LibraryView] Loading books...')
+  try {
+    const result = await invoke('list_books') as Book[]
+    console.log('[LibraryView] Books loaded:', result)
+    books.value = result
+  } catch (error) {
+    console.error('[LibraryView] Failed to load books:', error)
+    books.value = []
+  }
 }
 
 const importBook = async () => {
+  console.log('[import] Starting import process...')
+  await invoke('debug_log', { message: 'Starting import process...' })
+
   const filePath = await invoke<string | null>('select_file')
+  console.log('[import] Selected file:', filePath)
+  await invoke('debug_log', { message: `Selected file: ${filePath}` })
+
   if (!filePath) return
 
+  const ext = filePath.split('.').pop()?.toLowerCase()
+  let shouldConvert = false
+
+  console.log('[import] File extension:', ext)
+  await invoke('debug_log', { message: `File extension: ${ext}` })
+
+  // 如果是 TXT 文件，询问用户处理方式
+  if (ext === 'txt') {
+    console.log('[import] TXT file detected, asking user for conversion preference')
+    await invoke('debug_log', { message: 'TXT file detected, asking user for conversion preference' })
+
+    try {
+      shouldConvert = await confirm(
+        '检测到 TXT 文件。是否转换为 EPUB 格式以获得更好的阅读体验？',
+        { title: '文件格式选择', kind: 'info' }
+      )
+      console.log('[import] User chose to convert:', shouldConvert)
+      await invoke('debug_log', { message: `User chose to convert: ${shouldConvert}` })
+
+      if (!shouldConvert) {
+        // 直接作为 TXT 处理
+        console.log('[import] Processing as TXT directly...')
+        await invoke('debug_log', { message: 'Processing as TXT directly...' })
+        await processTxtFile(filePath)
+        return
+      }
+    } catch (confirmError) {
+      console.error('[import] Confirmation dialog failed:', confirmError)
+      await invoke('debug_log', { message: `Confirmation dialog failed: ${confirmError}` })
+      // 如果确认失败，默认转换为 EPUB
+      shouldConvert = true
+    }
+  }
+
   loading.value = true
-  loadingText.value = '解析中...'
+  loadingText.value = ext === 'txt' ? '转换为 EPUB...' : '解析中...'
 
   try {
-    console.log('[import] reading file:', filePath)
-    const buffer = await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
-    console.log('[import] buffer size:', buffer.byteLength)
-    const uint8 = new Uint8Array(buffer)
-    const ext = filePath.split('.').pop()?.toLowerCase()
-    console.log('[import] ext:', ext)
+    console.log('[import] Calling processFile...')
+    await invoke('debug_log', { message: 'Calling processFile...' })
+    await processFile(filePath, ext === 'txt' && shouldConvert)
+    console.log('[import] processFile completed, calling loadBooks...')
+    await invoke('debug_log', { message: 'processFile completed, calling loadBooks...' })
+    await loadBooks()
+    console.log('[import] Import completed successfully')
+    await invoke('debug_log', { message: 'Import completed successfully' })
+  } catch (e: any) {
+    console.error('[import] failed:', e?.message || e?.toString?.() || e)
+    console.error('[import] stack:', e?.stack)
+    loadingText.value = `导入失败: ${e?.message || e}`
+    await invoke('debug_log', { message: `Import failed: ${e?.message || e}` })
+  } finally {
+    loading.value = false
+  }
+}
 
-    const bookId = `book_${Date.now()}`
-    let title = ''
-    let author = ''
-    let language = 'und'
-    const chapters: Array<{ chapterId: string; content: string }> = []
+const processFile = async (filePath: string, convertToEpub: boolean) => {
+  console.log('[import] processFile started:', { filePath, convertToEpub })
+  const buffer = await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
+  console.log('[import] reading file:', filePath)
+  console.log('[import] buffer size:', buffer.byteLength)
+  console.log('[import] convertToEpub:', convertToEpub)
 
-    if (ext === 'epub') {
-      console.log('[import] parsing epub...')
-      const result = await parseEpubFile(uint8.buffer)
-      console.log('[import] parsed, title:', result.metadata.title, 'chapters:', result.chapters.length)
-      title = result.metadata.title
-      author = result.metadata.author
-      language = result.metadata.language
-      for (let i = 0; i < result.chapters.length; i++) {
-        const ch = result.chapters[i]
-        chapters.push({
-          chapterId: generateChapterId(i, ch.title),
-          content: ch.content,
-        })
-      }
-      // Save TOC data for chapter list UI and navigation
-      if (result.nestedToc && result.nestedToc.length > 0) {
-        await invoke('save_toc', { bookId, toc: JSON.stringify({
-          nested: result.nestedToc,
-          flat: result.flatToc,
-          hrefToIndex: result.hrefToChapterIndex,
-        }) })
-      }
-    } else {
-      const filename = filePath.split(/[/\\]/).pop() || 'unknown'
-      const result = parseTxtFile(uint8.buffer, filename)
-      title = result.title
-      author = result.author
-      language = result.language
-      for (let i = 0; i < result.chapters.length; i++) {
-        const ch = result.chapters[i]
-        chapters.push({
-          chapterId: generateChapterId(i, ch.title),
-          content: ch.content,
-        })
-      }
+  const bookId = `book_${Date.now()}`
+  console.log('[import] generated bookId:', bookId)
+  let title = ''
+  let author = ''
+  let language = 'und'
+  const chapters: Array<{ chapterId: string; content: string }> = []
+
+  if (convertToEpub) {
+    // 将 TXT 转换为 EPUB 格式保存
+    console.log('[import] converting txt to epub...')
+    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
+    console.log('[import] filename:', filename)
+    const txtResult = parseTxtFile(buffer, filename)
+    console.log('[import] parseTxtResult:', txtResult)
+
+    title = txtResult.title
+    author = txtResult.author
+    language = txtResult.language
+    console.log('[import] extracted:', { title, author, language })
+
+    // 准备章节数据
+    console.log('[import] preparing chapters...')
+    for (let i = 0; i < txtResult.chapters.length; i++) {
+      const ch = txtResult.chapters[i]
+      const chapterId = generateChapterId(i, ch.title)
+      chapters.push({
+        chapterId,
+        content: ch.content,
+      })
+      console.log(`[import] chapter ${i + 1}: ${ch.title} (${chapterId})`)
     }
 
-    loadingText.value = `保存中... (0/${chapters.length})`
+    // 创建 EPUB 文件
+    loadingText.value = '生成 EPUB...'
+    console.log('[import] txtResult chapters:', txtResult.chapters.length)
+    console.log('[import] txtResult title:', txtResult.title)
+    console.log('[import] calling txtToEpub...')
+    const epubBuffer = await txtToEpub({
+      title,
+      author,
+      language,
+      chapters: txtResult.chapters.map(ch => ({
+        title: ch.title,
+        content: ch.content
+      }))
+    })
+    console.log('[import] txtToEpub completed')
 
+    // 保存 EPUB 文件
+    console.log('[import] epubBuffer size:', epubBuffer.byteLength)
+    console.log('[import] saving epub file...')
+    await invoke('save_epub_file', {
+      bookId,
+      epubBuffer: Array.from(new Uint8Array(epubBuffer))
+    })
+    console.log('[import] epub file saved')
+
+    // 保存书籍信息
+    console.log('[import] saving book metadata...')
     await invoke('save_book', {
       metadata: {
         id: bookId,
@@ -185,8 +266,12 @@ const importBook = async () => {
         created_at: new Date().toISOString(),
       },
     })
+    console.log('[import] book metadata saved')
 
+    // 保存章节
+    console.log('[import] saving chapters...')
     for (let i = 0; i < chapters.length; i++) {
+      console.log(`[import] saving chapter ${i + 1}: ${chapters[i].chapterId}`)
       await invoke('save_chapter', {
         bookId,
         chapterId: chapters[i].chapterId,
@@ -194,14 +279,91 @@ const importBook = async () => {
       })
       loadingText.value = `保存中... (${i + 1}/${chapters.length})`
     }
+    console.log('[import] all chapters saved')
 
-    await loadBooks()
+    // 保存 TOC 供阅读视图使用
+    if (txtResult.chapters.length > 0) {
+      const tocData = buildToc(txtResult.chapters)
+      await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
+    }
+
+  } else {
+    // 原有的处理逻辑
+    await processTxtFile(filePath, buffer)
+  }
+  console.log('[import] processFile completed for:', filePath)
+  console.log('[import] reloading books list...')
+  await loadBooks()
+  console.log('[import] books list reloaded')
+}
+
+const processTxtFile = async (filePath: string, buffer?: ArrayBuffer) => {
+  console.log('[import] processTxtFile called with:', { filePath, buffer: !!buffer })
+  await invoke('debug_log', { message: `processTxtFile called with: ${filePath}, buffer: ${!!buffer}` })
+
+  try {
+    const bufferArray = buffer || await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
+    console.log('[import] buffer size:', bufferArray.byteLength)
+    await invoke('debug_log', { message: `Buffer size: ${bufferArray.byteLength}` })
+
+    const uint8 = new Uint8Array(bufferArray)
+    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
+    const ext = filePath.split('.').pop()?.toLowerCase()
+
+    console.log('[import] ext:', ext, 'filename:', filename)
+    await invoke('debug_log', { message: `File extension: ${ext}, filename: ${filename}` })
+
+    console.log('[import] Calling parseTxtFile...')
+    await invoke('debug_log', { message: 'Calling parseTxtFile...' })
+    const result = parseTxtFile(uint8.buffer, filename)
+    console.log('[import] parseTxtFile result:', result)
+    await invoke('debug_log', { message: `parseTxtFile result: title=${result.title}, author=${result.author}, language=${result.language}, chapters=${result.chapters.length}` })
+
+    const bookId = `book_${Date.now()}`
+    console.log('[import] generated bookId:', bookId)
+    const title = result.title
+    const author = result.author
+    const language = result.language
+    const chapters: Array<{ chapterId: string; content: string }> = []
+
+    for (let i = 0; i < result.chapters.length; i++) {
+      const ch = result.chapters[i]
+      chapters.push({
+        chapterId: generateChapterId(i, ch.title),
+        content: ch.content,
+      })
+    }
+
+  // Save TOC data for chapter list UI and navigation
+  if (result.chapters.length > 0) {
+    const tocData = buildToc(result.chapters)
+    await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
+  }
+
+  loadingText.value = `保存中... (0/${chapters.length})`
+
+  await invoke('save_book', {
+    metadata: {
+      id: bookId,
+      title,
+      author,
+      language,
+      created_at: new Date().toISOString(),
+    },
+  })
+
+  for (let i = 0; i < chapters.length; i++) {
+    await invoke('save_chapter', {
+      bookId,
+      chapterId: chapters[i].chapterId,
+      content: chapters[i].content,
+    })
+    loadingText.value = `保存中... (${i + 1}/${chapters.length})`
+  }
   } catch (e: any) {
-    console.error('[import] failed:', e?.message || e?.toString?.() || e)
-    console.error('[import] stack:', e?.stack)
-    loadingText.value = `导入失败: ${e?.message || e}`
-  } finally {
-    loading.value = false
+    console.error('[import] processTxtFile failed:', e?.message || e)
+    await invoke('debug_log', { message: `processTxtFile failed: ${e?.message || e}` })
+    throw e
   }
 }
 
@@ -337,33 +499,29 @@ onMounted(async () => {
 }
 
 .btn-import-pos {
-  top: 4px;
-  right: 40px;
+  bottom: 8px;
+  right: 8px;
 }
 
-/* 缩放手柄 */
-.resize-handle {
-  position: absolute;
-  z-index: 30;
+.btn-import {
+  background: rgba(0, 150, 0, 0.4);
+  border-color: rgba(0, 255, 0, 0.3);
+  color: rgba(0, 255, 0, 0.6);
 }
 
-.resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
-.resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
-.resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
-.resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
-.resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
-.resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
-.resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
-.resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+.btn-import:hover {
+  background: rgba(0, 150, 0, 0.6);
+  color: #fff;
+}
 
 /* 内容区域 */
 .content-area {
   flex: 1;
   overflow-y: scroll;
   overflow-x: hidden;
-  padding: 12px 10px 40px;
-  pointer-events: none;
+  padding: 40px 20px;
   opacity: 0;
+  transition: opacity 0.15s;
   scrollbar-width: none;
 }
 
@@ -372,7 +530,6 @@ onMounted(async () => {
 }
 
 .mouse-inside .content-area {
-  pointer-events: auto;
   opacity: 1;
 }
 
@@ -381,55 +538,51 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
-/* 书架样式 */
-.library {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .library-header {
+  margin-bottom: 20px;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 4px 10px;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .library-title {
-  font-size: 15px;
+  font-size: 24px;
   font-weight: 600;
-  letter-spacing: 1px;
 }
 
 .library-count {
-  font-size: 12px;
-  opacity: 0.5;
+  font-size: 14px;
+  opacity: 0.7;
 }
 
 .empty-hint {
   text-align: center;
-  color: rgba(255, 255, 255, 0.3);
-  padding: 60px 20px;
-  font-size: 13px;
-  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 40px 0;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px 0;
 }
 
 .book-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .book-card:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateX(4px);
 }
 
 .book-info {
@@ -438,49 +591,92 @@ onMounted(async () => {
 }
 
 .book-title {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
+  font-size: 16px;
+  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .book-author {
-  font-size: 12px;
-  margin-top: 3px;
+  font-size: 14px;
+  opacity: 0.7;
 }
 
 .btn-delete {
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity 0.2s;
+  padding: 4px;
 }
 
 .book-card:hover .btn-delete {
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .btn-delete:hover {
-  color: rgba(255, 100, 100, 0.8);
+  opacity: 1;
 }
 
-.btn-delete svg {
-  width: 14px;
-  height: 14px;
+/* 缩放手柄 */
+.resize-handle {
+  position: absolute;
+  z-index: 30;
 }
 
-.loading {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.5);
-  padding: 20px;
-  font-size: 14px;
+.resize-n {
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: n-resize;
+}
+.resize-s {
+  bottom: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: s-resize;
+}
+.resize-e {
+  right: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: e-resize;
+}
+.resize-w {
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: w-resize;
+}
+.resize-ne {
+  top: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: ne-resize;
+}
+.resize-nw {
+  top: -3px;
+  left: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: nw-resize;
+}
+.resize-se {
+  bottom: -3px;
+  right: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+}
+.resize-sw {
+  bottom: -3px;
+  left: -3px;
+  width: 12px;
+  height: 12px;
+  cursor: sw-resize;
 }
 </style>
