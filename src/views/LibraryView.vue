@@ -288,8 +288,63 @@ const processFile = async (filePath: string, convertToEpub: boolean) => {
     }
 
   } else {
-    // 原有的处理逻辑
-    await processTxtFile(filePath, buffer)
+    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
+
+    if (filename.toLowerCase().endsWith('.epub')) {
+      const result = await parseEpubFile(buffer)
+      title = result.metadata.title
+      author = result.metadata.author
+      language = result.metadata.language
+      for (let i = 0; i < result.chapters.length; i++) {
+        const ch = result.chapters[i]
+        chapters.push({
+          chapterId: generateChapterId(i, ch.title),
+          content: ch.content,
+        })
+      }
+      if (result.nestedToc && result.nestedToc.length > 0) {
+        await invoke('save_toc', { bookId, toc: JSON.stringify({
+          nested: result.nestedToc,
+          flat: result.flatToc,
+          hrefToIndex: result.hrefToChapterIndex,
+        }) })
+      }
+    } else {
+      const result = parseTxtFile(buffer, filename)
+      title = result.title
+      author = result.author
+      language = result.language
+      for (let i = 0; i < result.chapters.length; i++) {
+        const ch = result.chapters[i]
+        chapters.push({
+          chapterId: generateChapterId(i, ch.title),
+          content: ch.content,
+        })
+      }
+      if (result.chapters.length > 0) {
+        const tocData = buildToc(result.chapters)
+        await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
+      }
+    }
+
+    loadingText.value = `保存中... (0/${chapters.length})`
+    await invoke('save_book', {
+      metadata: {
+        id: bookId,
+        title,
+        author,
+        language,
+        created_at: new Date().toISOString(),
+      },
+    })
+    for (let i = 0; i < chapters.length; i++) {
+      await invoke('save_chapter', {
+        bookId,
+        chapterId: chapters[i].chapterId,
+        content: chapters[i].content,
+      })
+      loadingText.value = `保存中... (${i + 1}/${chapters.length})`
+    }
   }
   console.log('[import] processFile completed for:', filePath)
   console.log('[import] reloading books list...')
