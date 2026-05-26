@@ -46,7 +46,7 @@
       <div class="settings-row">
         <label>字号</label>
         <div class="size-controls">
-          <button @click="textSize = Math.max(12, textSize - 1)">-</button>
+          <button @click="textSize = Math.max(8, textSize - 1)">-</button>
           <span>{{ textSize }}px</span>
           <button @click="textSize = Math.min(32, textSize + 1)">+</button>
         </div>
@@ -110,6 +110,53 @@
           <div class="toggle-knob"></div>
         </div>
       </div>
+
+      <!-- TTS 分隔线 -->
+      <div class="settings-divider"></div>
+
+      <!-- TTS 播控 -->
+      <div class="settings-row tts-controls">
+        <label>朗读</label>
+        <div class="tts-buttons">
+          <button
+            class="tts-btn"
+            :class="{ active: ttsState !== 'idle' }"
+            @click="toggleTts"
+            :title="ttsState === 'playing' ? '暂停' : ttsState === 'paused' ? '继续' : '播放'"
+          >
+            <svg v-if="ttsState === 'playing'" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            <svg v-else viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+          </button>
+          <button
+            class="tts-btn"
+            :disabled="ttsState === 'idle'"
+            @click="stopTts"
+            title="停止"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div v-if="ttsVoices.length > 0" class="settings-row">
+        <label>语音</label>
+        <select class="tts-voice-select" v-model="ttsVoice">
+          <option v-for="v in ttsVoices" :key="v.id" :value="v.id">{{ v.name }}</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label>语速</label>
+        <div class="tts-rate-row">
+          <input
+            type="range"
+            min="0.5"
+            max="2.0"
+            step="0.1"
+            v-model.number="ttsRate"
+            class="opacity-slider"
+          />
+          <span class="tts-rate-label">{{ ttsRate.toFixed(1) }}x</span>
+        </div>
+      </div>
     </div>
 
     <!-- 章节选择图标 -->
@@ -135,11 +182,20 @@
       </button>
     </div>
 
+    <!-- TTS 播放/暂停浮动按钮 -->
+    <div v-if="ttsState !== 'idle'" class="btn-trigger btn-tts-pos" @mousedown.stop @click.stop>
+      <button class="btn-action btn-tts-float" @click="toggleTts" :title="ttsState === 'playing' ? '暂停' : '继续'">
+        <svg v-if="ttsState === 'playing'" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        <svg v-else viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      </button>
+    </div>
+
     <!-- 章节列表 -->
     <div
       v-if="showChapterList"
       ref="chapterListRef"
       class="float-panel chapter-dropdown"
+      :style="{ fontSize: textSize + 'px' }"
       @mousedown.stop
       @click.stop
     >
@@ -253,7 +309,9 @@
               v-for="(block, bidx) in chapter.blocks"
               :key="bidx"
               class="text-block"
+              :class="{ 'tts-active': isTtsBlock(chapter.id, bidx) }"
               :style="{ color: textColor, fontSize: textSize + 'px' }"
+              @dblclick.stop="startTtsFromBlock(chapter.id, bidx)"
             >
               {{ block }}
             </div>
@@ -271,6 +329,8 @@ import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { speak, stop as ttsStop, getVoices, onSpeechEvent } from "tauri-plugin-tts-api";
+import type { Voice } from "tauri-plugin-tts-api";
 
 const route = useRoute();
 const router = useRouter();
@@ -300,6 +360,16 @@ const textColor = ref("#e0e0e0");
 const bgColor = ref("#1a1a1a");
 const bgOpacity = ref(20);
 const hideOnLeave = ref(true);
+
+// TTS 状态
+const ttsVoices = ref<Voice[]>([]);
+const ttsVoice = ref("");
+const ttsRate = ref(1.0);
+const ttsState = ref<"idle" | "playing" | "paused">("idle");
+const ttsChapterId = ref("");
+const ttsBlockIndex = ref(0);
+
+let ttsUnlisten: (() => void) | null = null;
 
 const colorPresets = [
   "#ffffff",
@@ -422,6 +492,8 @@ const saveSettings = async () => {
         bg_color: bgColor.value,
         bg_opacity: bgOpacity.value,
         hide_on_leave: hideOnLeave.value,
+        tts_voice: ttsVoice.value || null,
+        tts_rate: ttsRate.value,
       },
     });
   } catch {}
@@ -437,6 +509,8 @@ const loadSettings = async () => {
       bgOpacity.value = settings.bg_opacity;
     if (settings?.hide_on_leave !== undefined)
       hideOnLeave.value = settings.hide_on_leave;
+    if (settings?.tts_voice) ttsVoice.value = settings.tts_voice;
+    if (settings?.tts_rate) ttsRate.value = settings.tts_rate;
   } catch {}
 };
 
@@ -657,11 +731,92 @@ const loadPreviousChapter = async () => {
 };
 
 const backToLibrary = () => {
+  stopTts();
   router.push("/");
 };
 
+// === TTS 逻辑 ===
+const isTtsBlock = (chapterId: string, blockIdx: number): boolean => {
+  return ttsState.value === "playing" && ttsChapterId.value === chapterId && ttsBlockIndex.value === blockIdx;
+};
+
+const getCurrentChapterBlocks = (): string[] => {
+  const ch = chapterBlocks.value.find((c) => c.id === currentChapterId.value);
+  return ch?.blocks || [];
+};
+
+const speakBlock = async () => {
+  const ch = chapterBlocks.value.find((c) => c.id === ttsChapterId.value);
+  if (!ch || ttsBlockIndex.value >= ch.blocks.length) {
+    ttsState.value = "idle";
+    return;
+  }
+  try {
+    await speak({
+      text: ch.blocks[ttsBlockIndex.value],
+      language: null,
+      voiceId: ttsVoice.value || null,
+      rate: ttsRate.value,
+      pitch: null,
+      volume: null,
+      queueMode: null,
+    });
+  } catch (e) {
+    console.error("TTS speak error:", e);
+    ttsState.value = "idle";
+  }
+};
+
+const startTts = async (fromBlockIndex = 0) => {
+  const blocks = getCurrentChapterBlocks();
+  if (blocks.length === 0) return;
+
+  await ttsStop();
+  ttsChapterId.value = currentChapterId.value;
+  ttsBlockIndex.value = fromBlockIndex;
+  ttsState.value = "playing";
+  await speakBlock();
+};
+
+const startTtsFromBlock = async (chapterId: string, blockIdx: number) => {
+  await ttsStop();
+  ttsChapterId.value = chapterId;
+  ttsBlockIndex.value = blockIdx;
+  ttsState.value = "playing";
+  await speakBlock();
+};
+
+const toggleTts = async () => {
+  if (ttsState.value === "idle") {
+    await startTts();
+  } else if (ttsState.value === "playing") {
+    await ttsStop();
+    ttsState.value = "paused";
+  } else if (ttsState.value === "paused") {
+    ttsState.value = "playing";
+    await speakBlock();
+  }
+};
+
+const stopTts = async () => {
+  await ttsStop();
+  ttsState.value = "idle";
+};
+
+const loadTtsVoices = async () => {
+  try {
+    const all = await getVoices();
+    ttsVoices.value = all.filter((v) => v.language.startsWith("zh"));
+    if (!ttsVoice.value && ttsVoices.value.length > 0) {
+      ttsVoice.value = ttsVoices.value[0].id;
+    }
+  } catch (e) {
+    console.error("Failed to load TTS voices:", e);
+  }
+};
+
 // Auto-save settings on change
-watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave], saveSettings);
+watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave, ttsVoice, ttsRate], saveSettings);
 
 // 打开章节列表时自动滚到当前章节
 watch(showChapterList, (val) => {
@@ -681,6 +836,18 @@ onMounted(async () => {
   if (chapters.value.length === 0) return;
   await restoreProgress();
 
+  // TTS 初始化
+  await loadTtsVoices();
+  ttsUnlisten = await onSpeechEvent("speech:finish", () => {
+    if (ttsState.value === "playing") {
+      ttsBlockIndex.value++;
+      speakBlock();
+    }
+  });
+  const ttsUnlistenCancel = await onSpeechEvent("speech:cancel", () => {
+    ttsState.value = "idle";
+  });
+
   const unlistenEnter = await listen("cursor-enter", () => onMouseEnter());
   const unlistenLeave = await listen("cursor-leave", () => onMouseLeave());
 
@@ -698,9 +865,12 @@ onMounted(async () => {
   );
 
   onUnmounted(() => {
+    stopTts();
     unlistenEnter();
     unlistenLeave();
     unlistenFocus();
+    ttsUnlisten?.();
+    ttsUnlistenCancel();
   });
 });
 </script>
@@ -798,6 +968,22 @@ onMounted(async () => {
   right: 8px;
 }
 
+.btn-tts-pos {
+  bottom: 8px;
+  right: 40px;
+}
+
+.btn-tts-float {
+  border-color: rgba(100, 180, 255, 0.5);
+  color: rgba(100, 180, 255, 0.8);
+  background: rgba(0, 60, 120, 0.4);
+}
+
+.btn-tts-float:hover {
+  background: rgba(0, 60, 120, 0.6);
+  color: #fff;
+}
+
 /* 浮动面板 */
 .float-panel {
   z-index: 25;
@@ -813,6 +999,13 @@ onMounted(async () => {
   right: 8px;
   padding: 12px 16px;
   min-width: 200px;
+  max-height: calc(100vh - 50px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.settings-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .settings-row {
@@ -988,7 +1181,6 @@ onMounted(async () => {
 .chapter-group {
   padding: 7px 14px;
   color: rgba(255, 255, 255, 0.85);
-  font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1015,7 +1207,6 @@ onMounted(async () => {
 .chapter-item {
   padding: 7px 14px;
   color: rgba(255, 255, 255, 0.7);
-  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -1139,5 +1330,92 @@ onMounted(async () => {
   width: 12px;
   height: 12px;
   cursor: sw-resize;
+}
+
+/* TTS */
+.settings-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 10px 0;
+}
+
+.tts-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.tts-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.tts-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tts-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tts-btn.active {
+  border-color: rgba(100, 180, 255, 0.5);
+  color: rgba(100, 180, 255, 0.9);
+}
+
+.tts-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.tts-voice-select {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.8);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  max-width: 140px;
+  outline: none;
+}
+
+.tts-voice-select option {
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+.tts-rate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.tts-rate-label {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  min-width: 32px;
+  text-align: right;
+}
+
+.text-block.tts-active {
+  background: rgba(100, 180, 255, 0.12);
+  border-radius: 4px;
+  margin-left: -6px;
+  margin-right: -6px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 </style>

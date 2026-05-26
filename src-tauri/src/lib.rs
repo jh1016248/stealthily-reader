@@ -28,6 +28,14 @@ struct Settings {
     bg_color: String,
     bg_opacity: u32,
     hide_on_leave: bool,
+    #[serde(default)]
+    tts_voice: Option<String>,
+    #[serde(default = "default_tts_rate")]
+    tts_rate: f64,
+}
+
+fn default_tts_rate() -> f64 {
+    1.0
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -46,6 +54,8 @@ impl Default for Settings {
             bg_color: "#1a1a1a".to_string(),
             bg_opacity: 85,
             hide_on_leave: true,
+            tts_voice: None,
+            tts_rate: 1.0,
         }
     }
 }
@@ -386,6 +396,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_tts::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .setup(|app| {
             APP_HANDLE.set(app.handle().clone()).ok();

@@ -18,14 +18,38 @@
       "Read(//Users/huangjianhong/.claude/**)",
       "Read(//Users/huangjianhong/**)",
       "Bash(awk '{print $6/1024 \" MB\"}')",
-      "Bash(sed -n '97,101p' /Volumes/ssd/work/john/github/attempt/stealthily-reader/src/views/LibraryView.vue)",
-      "Bash(sed -n '181,185p' /Volumes/ssd/work/john/github/attempt/stealthily-reader/src/views/ReadingView.vue)",
-      "Bash(git tag *)"
+      "Bash(sed -n *)",
+      "Bash(git tag *)",
+      "WebSearch",
+      "Bash(python3 -c ' *)",
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "Bash(curl -s \"https://qt.gtimg.cn/q=sz000ovac\")",
+      "Bash(curl *)",
+      "WebFetch(domain:vip.stock.finance.sina.com.cn)",
+      "Bash(iconv -f utf-8 -t utf-8)",
+      "Bash(npm run *)",
+      "Bash(node test-encoding.js)",
+      "Bash(./app)",
+      "Bash(pkill -f app)",
+      "Bash(kill -9 4405)",
+      "Bash(pkill -f \"tauri dev\")",
+      "Bash(rm -rf \"/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779436262778\" \"/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779436262778.epub\")",
+      "Bash(rm -rf \"/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779430986162\" \"/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779436797628\" \"/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779436797628.epub\")",
+      "Bash(grep -n \"^━\\\\|^$\\\\|^第\\\\|^楔子\\\\|^序\" \"/Users/huangjianhong/Documents/work/john/2025/nodejs/puppeteer-demo/books/翁婿乱情【修订版】/翁婿乱情【修订版】.txt\")",
+      "Bash(node -e ' *)",
+      "Bash(pkill -f \"target/debug/app\")",
+      "Bash(pkill -f \"vite\")",
+      "mcp__plugin_claude-mem_mcp-search__smart_search",
+      "Bash(npm install *)",
+      "Bash(cargo update *)"
     ],
     "additionalDirectories": [
       "/Users/huangjianhong/.git",
       "/Users/huangjianhong/.git/hooks",
-      "/private/tmp/test-github-hook"
+      "/private/tmp/test-github-hook",
+      "/Volumes/ssd/work/john/github/attempt-stealthily-reader",
+      "/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779436262778",
+      "/Users/huangjianhong/Library/Application Support/com.stealthily.reader/books/book_1779430986162"
     ]
   }
 }

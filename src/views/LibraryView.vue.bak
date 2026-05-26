@@ -64,8 +64,7 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 import { parseEpubFile, generateChapterId } from '@/lib/epub-parser'
-import { parseTxtFile, buildToc } from '@/lib/txt-parser'
-import { txtToEpub } from '@/lib/txt-to-epub'
+import { parseTxtFile } from '@/lib/txt-parser'
 import { listen } from '@tauri-apps/api/event'
 
 const router = useRouter()
@@ -114,58 +113,26 @@ const startResize = (direction: string) => {
 }
 
 const loadBooks = async () => {
-  console.log('[LibraryView] Loading books...')
-  try {
-    const result = await invoke('list_books') as Book[]
-    console.log('[LibraryView] Books loaded:', result)
-    books.value = result
-  } catch (error) {
-    console.error('[LibraryView] Failed to load books:', error)
-    books.value = []
-  }
+  books.value = await invoke('list_books')
 }
 
 const importBook = async () => {
-  console.log('[import] Starting import process...')
-  await invoke('debug_log', { message: 'Starting import process...' })
-
   const filePath = await invoke<string | null>('select_file')
-  console.log('[import] Selected file:', filePath)
-  await invoke('debug_log', { message: `Selected file: ${filePath}` })
-
   if (!filePath) return
 
   const ext = filePath.split('.').pop()?.toLowerCase()
-  let shouldConvert = false
-
-  console.log('[import] File extension:', ext)
-  await invoke('debug_log', { message: `File extension: ${ext}` })
 
   // 如果是 TXT 文件，询问用户处理方式
   if (ext === 'txt') {
-    console.log('[import] TXT file detected, asking user for conversion preference')
-    await invoke('debug_log', { message: 'TXT file detected, asking user for conversion preference' })
+    const shouldConvert = await confirm(
+      '检测到 TXT 文件。是否转换为 EPUB 格式以获得更好的阅读体验？',
+      { title: '文件格式选择', kind: 'info' }
+    )
 
-    try {
-      shouldConvert = await confirm(
-        '检测到 TXT 文件。是否转换为 EPUB 格式以获得更好的阅读体验？',
-        { title: '文件格式选择', kind: 'info' }
-      )
-      console.log('[import] User chose to convert:', shouldConvert)
-      await invoke('debug_log', { message: `User chose to convert: ${shouldConvert}` })
-
-      if (!shouldConvert) {
-        // 直接作为 TXT 处理
-        console.log('[import] Processing as TXT directly...')
-        await invoke('debug_log', { message: 'Processing as TXT directly...' })
-        await processTxtFile(filePath)
-        return
-      }
-    } catch (confirmError) {
-      console.error('[import] Confirmation dialog failed:', confirmError)
-      await invoke('debug_log', { message: `Confirmation dialog failed: ${confirmError}` })
-      // 如果确认失败，默认转换为 EPUB
-      shouldConvert = true
+    if (!shouldConvert) {
+      // 直接作为 TXT 处理
+      await processTxtFile(filePath)
+      return
     }
   }
 
@@ -173,33 +140,22 @@ const importBook = async () => {
   loadingText.value = ext === 'txt' ? '转换为 EPUB...' : '解析中...'
 
   try {
-    console.log('[import] Calling processFile...')
-    await invoke('debug_log', { message: 'Calling processFile...' })
     await processFile(filePath, ext === 'txt' && shouldConvert)
-    console.log('[import] processFile completed, calling loadBooks...')
-    await invoke('debug_log', { message: 'processFile completed, calling loadBooks...' })
-    await loadBooks()
-    console.log('[import] Import completed successfully')
-    await invoke('debug_log', { message: 'Import completed successfully' })
   } catch (e: any) {
     console.error('[import] failed:', e?.message || e?.toString?.() || e)
     console.error('[import] stack:', e?.stack)
     loadingText.value = `导入失败: ${e?.message || e}`
-    await invoke('debug_log', { message: `Import failed: ${e?.message || e}` })
   } finally {
     loading.value = false
   }
 }
 
 const processFile = async (filePath: string, convertToEpub: boolean) => {
-  console.log('[import] processFile started:', { filePath, convertToEpub })
   const buffer = await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
   console.log('[import] reading file:', filePath)
   console.log('[import] buffer size:', buffer.byteLength)
-  console.log('[import] convertToEpub:', convertToEpub)
 
   const bookId = `book_${Date.now()}`
-  console.log('[import] generated bookId:', bookId)
   let title = ''
   let author = ''
   let language = 'und'
@@ -208,33 +164,24 @@ const processFile = async (filePath: string, convertToEpub: boolean) => {
   if (convertToEpub) {
     // 将 TXT 转换为 EPUB 格式保存
     console.log('[import] converting txt to epub...')
-    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
-    console.log('[import] filename:', filename)
+    const filename = new URL(`file://${filePath}`).pathname.split('/').pop() || 'unknown'
     const txtResult = parseTxtFile(buffer, filename)
-    console.log('[import] parseTxtResult:', txtResult)
 
     title = txtResult.title
     author = txtResult.author
     language = txtResult.language
-    console.log('[import] extracted:', { title, author, language })
 
     // 准备章节数据
-    console.log('[import] preparing chapters...')
     for (let i = 0; i < txtResult.chapters.length; i++) {
       const ch = txtResult.chapters[i]
-      const chapterId = generateChapterId(i, ch.title)
       chapters.push({
-        chapterId,
+        chapterId: generateChapterId(i, ch.title),
         content: ch.content,
       })
-      console.log(`[import] chapter ${i + 1}: ${ch.title} (${chapterId})`)
     }
 
     // 创建 EPUB 文件
     loadingText.value = '生成 EPUB...'
-    console.log('[import] txtResult chapters:', txtResult.chapters.length)
-    console.log('[import] txtResult title:', txtResult.title)
-    console.log('[import] calling txtToEpub...')
     const epubBuffer = await txtToEpub({
       title,
       author,
@@ -244,19 +191,14 @@ const processFile = async (filePath: string, convertToEpub: boolean) => {
         content: ch.content
       }))
     })
-    console.log('[import] txtToEpub completed')
 
     // 保存 EPUB 文件
-    console.log('[import] epubBuffer size:', epubBuffer.byteLength)
-    console.log('[import] saving epub file...')
     await invoke('save_epub_file', {
       bookId,
       epubBuffer: Array.from(new Uint8Array(epubBuffer))
     })
-    console.log('[import] epub file saved')
 
     // 保存书籍信息
-    console.log('[import] saving book metadata...')
     await invoke('save_book', {
       metadata: {
         id: bookId,
@@ -266,133 +208,57 @@ const processFile = async (filePath: string, convertToEpub: boolean) => {
         created_at: new Date().toISOString(),
       },
     })
-    console.log('[import] book metadata saved')
 
     // 保存章节
-    console.log('[import] saving chapters...')
     for (let i = 0; i < chapters.length; i++) {
-      console.log(`[import] saving chapter ${i + 1}: ${chapters[i].chapterId}`)
       await invoke('save_chapter', {
         bookId,
         chapterId: chapters[i].chapterId,
         content: chapters[i].content,
       })
       loadingText.value = `保存中... (${i + 1}/${chapters.length})`
-    }
-    console.log('[import] all chapters saved')
-
-    // 保存 TOC 供阅读视图使用
-    if (txtResult.chapters.length > 0) {
-      const tocData = buildToc(txtResult.chapters)
-      await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
     }
 
   } else {
-    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
-
-    if (filename.toLowerCase().endsWith('.epub')) {
-      const result = await parseEpubFile(buffer)
-      title = result.metadata.title
-      author = result.metadata.author
-      language = result.metadata.language
-      for (let i = 0; i < result.chapters.length; i++) {
-        const ch = result.chapters[i]
-        chapters.push({
-          chapterId: generateChapterId(i, ch.title),
-          content: ch.content,
-        })
-      }
-      if (result.nestedToc && result.nestedToc.length > 0) {
-        await invoke('save_toc', { bookId, toc: JSON.stringify({
-          nested: result.nestedToc,
-          flat: result.flatToc,
-          hrefToIndex: result.hrefToChapterIndex,
-        }) })
-      }
-    } else {
-      const result = parseTxtFile(buffer, filename)
-      title = result.title
-      author = result.author
-      language = result.language
-      for (let i = 0; i < result.chapters.length; i++) {
-        const ch = result.chapters[i]
-        chapters.push({
-          chapterId: generateChapterId(i, ch.title),
-          content: ch.content,
-        })
-      }
-      if (result.chapters.length > 0) {
-        const tocData = buildToc(result.chapters)
-        await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
-      }
-    }
-
-    loadingText.value = `保存中... (0/${chapters.length})`
-    await invoke('save_book', {
-      metadata: {
-        id: bookId,
-        title,
-        author,
-        language,
-        created_at: new Date().toISOString(),
-      },
-    })
-    for (let i = 0; i < chapters.length; i++) {
-      await invoke('save_chapter', {
-        bookId,
-        chapterId: chapters[i].chapterId,
-        content: chapters[i].content,
-      })
-      loadingText.value = `保存中... (${i + 1}/${chapters.length})`
-    }
+    // 原有的处理逻辑
+    await processTxtFile(filePath, buffer)
   }
-  console.log('[import] processFile completed for:', filePath)
-  console.log('[import] reloading books list...')
+
   await loadBooks()
-  console.log('[import] books list reloaded')
 }
 
 const processTxtFile = async (filePath: string, buffer?: ArrayBuffer) => {
-  console.log('[import] processTxtFile called with:', { filePath, buffer: !!buffer })
-  await invoke('debug_log', { message: `processTxtFile called with: ${filePath}, buffer: ${!!buffer}` })
+  const bufferArray = buffer || await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
+  const uint8 = new Uint8Array(bufferArray)
+  const filename = new URL(`file://${filePath}`).pathname.split('/').pop() || 'unknown'
+  const ext = filePath.split('.').pop()?.toLowerCase()
 
-  try {
-    const bufferArray = buffer || await invoke<ArrayBuffer>('read_file_binary', { path: filePath })
-    console.log('[import] buffer size:', bufferArray.byteLength)
-    await invoke('debug_log', { message: `Buffer size: ${bufferArray.byteLength}` })
+  console.log('[import] ext:', ext)
 
-    const uint8 = new Uint8Array(bufferArray)
-    const filename = filePath.replace(/\\/g, '/').split('/').pop() || 'unknown'
-    const ext = filePath.split('.').pop()?.toLowerCase()
-
-    console.log('[import] ext:', ext, 'filename:', filename)
-    await invoke('debug_log', { message: `File extension: ${ext}, filename: ${filename}` })
-
-    console.log('[import] Calling parseTxtFile...')
-    await invoke('debug_log', { message: 'Calling parseTxtFile...' })
-    const result = parseTxtFile(uint8.buffer, filename)
-    console.log('[import] parseTxtFile result:', result)
-    await invoke('debug_log', { message: `parseTxtFile result: title=${result.title}, author=${result.author}, language=${result.language}, chapters=${result.chapters.length}` })
-
-    const bookId = `book_${Date.now()}`
-    console.log('[import] generated bookId:', bookId)
-    const title = result.title
-    const author = result.author
-    const language = result.language
-    const chapters: Array<{ chapterId: string; content: string }> = []
-
-    for (let i = 0; i < result.chapters.length; i++) {
-      const ch = result.chapters[i]
-      chapters.push({
-        chapterId: generateChapterId(i, ch.title),
-        content: ch.content,
-      })
-    }
+  const result = parseTxtFile(uint8.buffer, filename)
+  const bookId = `book_${Date.now()}`
+  title = result.title
+  author = result.author
+  language = result.language
+  for (let i = 0; i < result.chapters.length; i++) {
+    const ch = result.chapters[i]
+    chapters.push({
+      chapterId: generateChapterId(i, ch.title),
+      content: ch.content,
+    })
+  }
 
   // Save TOC data for chapter list UI and navigation
   if (result.chapters.length > 0) {
-    const tocData = buildToc(result.chapters)
-    await invoke('save_toc', { bookId, toc: JSON.stringify(tocData) })
+    const flatToc = result.chapters.map((ch, i) => ({
+      label: ch.title,
+      href: `chapter-${i}`
+    }))
+    await invoke('save_toc', { bookId, toc: JSON.stringify({
+      nested: flatToc,
+      flat: flatToc,
+      hrefToIndex: {},
+    }) })
   }
 
   loadingText.value = `保存中... (0/${chapters.length})`
@@ -415,11 +281,8 @@ const processTxtFile = async (filePath: string, buffer?: ArrayBuffer) => {
     })
     loadingText.value = `保存中... (${i + 1}/${chapters.length})`
   }
-  } catch (e: any) {
-    console.error('[import] processTxtFile failed:', e?.message || e)
-    await invoke('debug_log', { message: `processTxtFile failed: ${e?.message || e}` })
-    throw e
-  }
+
+  await loadBooks()
 }
 
 const openBook = (bookId: string) => {
@@ -574,7 +437,7 @@ onMounted(async () => {
   flex: 1;
   overflow-y: scroll;
   overflow-x: hidden;
-  padding: 30px 16px;
+  padding: 40px 20px;
   opacity: 0;
   transition: opacity 0.15s;
   scrollbar-width: none;
@@ -594,19 +457,19 @@ onMounted(async () => {
 }
 
 .library-header {
-  margin-bottom: 14px;
+  margin-bottom: 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .library-title {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 600;
 }
 
 .library-count {
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.7;
 }
 
@@ -624,8 +487,8 @@ onMounted(async () => {
 .book-card {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -642,19 +505,15 @@ onMounted(async () => {
 
 .book-info {
   flex: 1;
-  min-width: 0;
 }
 
 .book-title {
-  font-size: 14px;
-  margin-bottom: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 16px;
+  margin-bottom: 4px;
 }
 
 .book-author {
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.7;
 }
 
