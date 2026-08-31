@@ -203,41 +203,29 @@
         返回书架
       </div>
       <template v-if="nestedChapters.length > 0">
-        <template v-for="(item, idx) in nestedChapters" :key="idx">
+        <template v-for="entry in chapterListEntries" :key="entry.path">
           <div
-            v-if="item.subitems && item.subitems.length > 0"
+            v-if="entry.hasChildren"
             class="chapter-group"
-            @click="toggleChapterGroup(idx)"
+            :style="{ paddingLeft: 14 + entry.depth * 16 + 'px' }"
+            @click="toggleChapterGroup(entry.path)"
             @mousedown.stop
           >
             <span class="chapter-group-icon">{{
-              item.expanded ? "▼" : "▶"
+              expandedChapterGroups.has(entry.path) ? "▼" : "▶"
             }}</span>
-            <span class="chapter-group-label">{{ item.label }}</span>
+            <span class="chapter-group-label">{{ entry.item.label }}</span>
           </div>
           <div
-            v-else-if="item.href"
+            v-else-if="entry.item.href"
             class="chapter-item"
-            :class="{ active: isCurrentChapter(item.href) }"
-            @click="selectChapterByHref(item.href)"
+            :class="{ active: isCurrentChapter(entry.item.href) }"
+            :style="{ paddingLeft: 14 + entry.depth * 16 + 'px' }"
+            @click="selectChapterByHref(entry.item.href)"
             @mousedown.stop
           >
-            {{ item.label }}
+            {{ entry.item.label }}
           </div>
-          <template
-            v-if="item.subitems && item.subitems.length > 0 && item.expanded"
-          >
-            <div
-              v-for="subitem in item.subitems"
-              :key="subitem.href"
-              class="chapter-item chapter-subitem"
-              :class="{ active: isCurrentChapter(subitem.href) }"
-              @click="selectChapterByHref(subitem.href)"
-              @mousedown.stop
-            >
-              {{ subitem.label }}
-            </div>
-          </template>
         </template>
       </template>
       <template v-else>
@@ -331,6 +319,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { speak, stop as ttsStop, getVoices, onSpeechEvent } from "tauri-plugin-tts-api";
 import type { Voice } from "tauri-plugin-tts-api";
+import {
+  getChapterWindow,
+  getExpandedTocAncestorPaths,
+} from "../lib/reading-state";
 
 const route = useRoute();
 const router = useRouter();
@@ -348,10 +340,43 @@ const loadingNext = ref(false);
 const loadingPrev = ref(false);
 const chapters = ref<string[]>([]);
 const currentChapterId = ref("");
-const nestedChapters = ref<
-  Array<{ label: string; href?: string; subitems?: any[]; expanded?: boolean }>
->([]);
+interface ChapterTocItem {
+  label: string;
+  href?: string;
+  subitems?: ChapterTocItem[];
+}
+
+interface ChapterListEntry {
+  item: ChapterTocItem;
+  path: string;
+  depth: number;
+  hasChildren: boolean;
+}
+
+const nestedChapters = ref<ChapterTocItem[]>([]);
+const expandedChapterGroups = ref<Set<string>>(new Set());
 const hrefToIndex = ref<Record<string, number>>({});
+const chapterListEntries = computed<ChapterListEntry[]>(() => {
+  const entries: ChapterListEntry[] = [];
+
+  const appendEntries = (
+    items: ChapterTocItem[],
+    parentPath: string,
+    depth: number,
+  ) => {
+    for (const [index, item] of items.entries()) {
+      const path = parentPath ? `${parentPath}.${index}` : String(index);
+      const hasChildren = Boolean(item.subitems?.length);
+      entries.push({ item, path, depth, hasChildren });
+      if (hasChildren && expandedChapterGroups.value.has(path)) {
+        appendEntries(item.subitems!, path, depth + 1);
+      }
+    }
+  };
+
+  appendEntries(nestedChapters.value, "", 0);
+  return entries;
+});
 const chapterBlocks = ref<
   Array<{ id: string; title: string; blocks: string[] }>
 >([]);
@@ -514,9 +539,18 @@ const loadSettings = async () => {
   } catch {}
 };
 
+const setFlatChapterToc = () => {
+  nestedChapters.value = chapters.value.map((chapter) => ({
+    label: chapter.replace(/^\d+_/, ""),
+    href: chapter,
+  }));
+  hrefToIndex.value = Object.fromEntries(
+    chapters.value.map((chapter, index) => [chapter, index]),
+  );
+};
+
 const loadChapters = async () => {
   chapters.value = await invoke("list_chapters", { bookId: bookId.value });
-  // Load nested TOC for chapter list UI
   try {
     const toc = await invoke<string | null>("load_toc", {
       bookId: bookId.value,
@@ -526,24 +560,38 @@ const loadChapters = async () => {
       nestedChapters.value = tocData.nested || [];
       hrefToIndex.value = tocData.hrefToIndex || {};
     } else {
-      // Fallback: create flat structure from chapter IDs
-      nestedChapters.value = chapters.value.map((ch) => ({
-        label: ch.replace(/^\d+_/, ""),
-        href: ch,
-      }));
+      setFlatChapterToc();
     }
   } catch {
-    nestedChapters.value = chapters.value.map((ch) => ({
-      label: ch.replace(/^\d+_/, ""),
-      href: ch,
-    }));
+    setFlatChapterToc();
   }
 };
 
-const toggleChapterGroup = (index: number) => {
-  if (nestedChapters.value[index]) {
-    nestedChapters.value[index].expanded =
-      !nestedChapters.value[index].expanded;
+const toggleChapterGroup = (path: string) => {
+  const expanded = new Set(expandedChapterGroups.value);
+  if (expanded.has(path)) {
+    expanded.delete(path);
+  } else {
+    expanded.add(path);
+  }
+  expandedChapterGroups.value = expanded;
+};
+
+const expandCurrentChapterAncestors = (chapterId: string) => {
+  const targetHref =
+    Object.entries(hrefToIndex.value).find(
+      ([, chapterIndex]) => chapters.value[chapterIndex] === chapterId,
+    )?.[0] || chapterId;
+  const ancestorPaths = getExpandedTocAncestorPaths(
+    nestedChapters.value,
+    targetHref,
+  );
+
+  if (ancestorPaths.length > 0) {
+    expandedChapterGroups.value = new Set([
+      ...expandedChapterGroups.value,
+      ...ancestorPaths,
+    ]);
   }
 };
 
@@ -588,15 +636,8 @@ const deriveCurrentChapterId = (): string => {
   return detectedId;
 };
 
-const getWindowChapterIds = (centerChapterId: string): string[] => {
-  const idx = chapters.value.findIndex((c) => c === centerChapterId);
-  if (idx < 0) return [centerChapterId];
-  const ids: string[] = [];
-  if (idx > 0) ids.push(chapters.value[idx - 1]);
-  ids.push(chapters.value[idx]);
-  if (idx < chapters.value.length - 1) ids.push(chapters.value[idx + 1]);
-  return ids;
-};
+const getWindowChapterIds = (centerChapterId: string): string[] =>
+  getChapterWindow(chapters.value, centerChapterId);
 
 const loadChapterWindow = async (centerChapterId: string) => {
   loading.value = true;
@@ -817,6 +858,7 @@ const loadTtsVoices = async () => {
 
 // Auto-save settings on change
 watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave, ttsVoice, ttsRate], saveSettings);
+watch(currentChapterId, expandCurrentChapterAncestors);
 
 // 打开章节列表时自动滚到当前章节
 watch(showChapterList, (val) => {
