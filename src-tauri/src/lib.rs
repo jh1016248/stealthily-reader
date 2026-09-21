@@ -32,6 +32,10 @@ struct Settings {
     tts_voice: Option<String>,
     #[serde(default = "default_tts_rate")]
     tts_rate: f64,
+    #[serde(default)]
+    tts_engine: Option<String>,
+    #[serde(default)]
+    tts_edge_voice: Option<String>,
 }
 
 fn default_tts_rate() -> f64 {
@@ -56,6 +60,8 @@ impl Default for Settings {
             hide_on_leave: true,
             tts_voice: None,
             tts_rate: 1.0,
+            tts_engine: None,
+            tts_edge_voice: None,
         }
     }
 }
@@ -276,6 +282,207 @@ use std::sync::OnceLock;
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
+// === Edge TTS（微软在线，免费，音质好） ===
+mod edge_tts {
+    use kothok_edge_tts::{init_tls, EdgeTts, TtsEvent};
+    use serde::Serialize;
+    use std::process::Command;
+    use std::sync::OnceLock;
+
+    static INIT: OnceLock<()> = OnceLock::new();
+
+    fn player_lock() -> &'static std::sync::Mutex<Option<std::process::Child>> {
+        static PLAYER: OnceLock<std::sync::Mutex<Option<std::process::Child>>> = OnceLock::new();
+        PLAYER.get_or_init(|| std::sync::Mutex::new(None))
+    }
+
+    // 预合成缓存: text -> mp3 路径（FIFO，最多 4 条）
+    fn cache() -> &'static std::sync::Mutex<Vec<(String, std::path::PathBuf)>> {
+        static CACHE: OnceLock<std::sync::Mutex<Vec<(String, std::path::PathBuf)>>> = OnceLock::new();
+        CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+    }
+
+    /// 在线合成 mp3 字节。超长文本（Edge 单次约 4KB 上限）按句切分逐段合成后拼接。
+    /// 全局串行：同一时间只允许一个合成连接，避免并发 WebSocket 被微软限流（403）
+    async fn synth_mp3(text: &str, voice: &str, rate_str: &str) -> Result<Vec<u8>, String> {
+        INIT.get_or_init(|| init_tls());
+
+        static SYNTH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        let _guard = SYNTH_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+
+        let mut chunks: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        for seg in text.split(|c: char| c == '。' || c == '！' || c == '？' || c == '；' || c == '\n') {
+            let seg = seg.trim();
+            if seg.is_empty() { continue; }
+            if cur.len() + seg.len() + 1 > 2500 {
+                if !cur.is_empty() { chunks.push(cur.clone()); }
+                cur.clear();
+            }
+            if !cur.is_empty() { cur.push('。'); }
+            cur.push_str(seg);
+        }
+        if !cur.is_empty() { chunks.push(cur); }
+        if chunks.is_empty() { chunks.push(text.to_string()); }
+
+        let mut audio = Vec::new();
+        for chunk in &chunks {
+            let events = kothok_edge_tts::Engine::synthesize(
+                &EdgeTts, chunk, voice, rate_str, "zh-CN",
+            )
+            .await
+            .map_err(|e| format!("Edge TTS 连接失败: {e:?}"))?;
+            for ev in events {
+                if let TtsEvent::Audio(bytes) = ev {
+                    audio.extend_from_slice(&bytes);
+                }
+            }
+        }
+        if audio.is_empty() {
+            return Err("未收到音频数据".into());
+        }
+        Ok(audio)
+    }
+
+    #[derive(Serialize, Clone, Copy)]
+    pub struct EdgeVoice {
+        pub id: &'static str,
+        pub name: &'static str,
+    }
+
+    #[tauri::command]
+    pub fn edge_tts_voices() -> Vec<EdgeVoice> {
+        vec![
+            EdgeVoice { id: "zh-CN-XiaoxiaoNeural", name: "晓晓（女声·温柔）" },
+            EdgeVoice { id: "zh-CN-XiaoyiNeural", name: "晓伊（女声·活泼）" },
+            EdgeVoice { id: "zh-CN-YunjianNeural", name: "云健（男声·浑厚）" },
+            EdgeVoice { id: "zh-CN-YunxiNeural", name: "云希（男声·阳光）" },
+            EdgeVoice { id: "zh-CN-YunyangNeural", name: "云扬（男声·新闻）" },
+            EdgeVoice { id: "zh-CN-liaoning-XiaobeiNeural", name: "晓北（东北女声）" },
+            EdgeVoice { id: "zh-CN-shaanxi-XiaoniNeural", name: "晓妮（陕西女声）" },
+        ]
+    }
+
+    /// 后台预合成下一段（当前段播放期间调用，消除段间停顿）
+    #[tauri::command]
+    pub async fn edge_tts_prefetch(text: String, voice: String, rate: f64) -> Result<(), String> {
+        {
+            let c = cache().lock().unwrap();
+            if c.iter().any(|(t, _)| t == &text) {
+                return Ok(());
+            }
+        }
+        tauri::async_runtime::spawn(async move {
+            let pct = ((rate - 1.0) * 100.0).round() as i32;
+            let rate_str = format!("{pct:+}%");
+            // 预取失败静默重试 3 次
+            let mut audio = None;
+            for _ in 0..3 {
+                match synth_mp3(&text, &voice, &rate_str).await {
+                    Ok(a) => {
+                        audio = Some(a);
+                        break;
+                    }
+                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(600)).await,
+                }
+            }
+            if let Some(audio) = audio {
+                // 用文本哈希做文件名避免碰撞
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                text.hash(&mut h);
+                let path = std::env::temp_dir().join(format!("stealthily-prefetch-{:x}.mp3", h.finish()));
+                if std::fs::write(&path, audio).is_ok() {
+                    let mut c = cache().lock().unwrap();
+                    c.push((text, path));
+                    while c.len() > 4 {
+                        let (_, old) = c.remove(0);
+                        let _ = std::fs::remove_file(old);
+                    }
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// 在线合成（或命中预取缓存）并用 afplay 播放；自然播完 Ok，被 stop 打断 Err("stopped")
+    #[tauri::command]
+    pub async fn edge_tts_speak(text: String, voice: String, rate: f64) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            // rate: 0.5~2.0 → SSML 百分比
+            let pct = ((rate - 1.0) * 100.0).round() as i32;
+            let rate_str = format!("{pct:+}%");
+
+            // 命中预取缓存则直接播放，否则现场合成
+            let mp3 = {
+                let mut c = cache().lock().unwrap();
+                match c.iter().position(|(t, _)| t == &text) {
+                    Some(i) => c.remove(i).1,
+                    None => {
+                        let audio = tauri::async_runtime::block_on(synth_mp3(&text, &voice, &rate_str))?;
+                        let path = std::env::temp_dir().join(format!("stealthily-edge-{}.mp3", std::process::id()));
+                        std::fs::write(&path, audio).map_err(|e| e.to_string())?;
+                        path
+                    }
+                }
+            };
+
+            let child = Command::new("afplay")
+                .arg(&mp3)
+                .spawn()
+                .map_err(|e| format!("afplay 启动失败: {e}"))?;
+            *player_lock().lock().unwrap() = Some(child);
+
+            // 轮询等待播放结束（不持锁阻塞，stop 才能随时杀掉播放进程）
+            let mut killed = false;
+            let success = loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let mut p = player_lock().lock().unwrap();
+                match p.as_mut() {
+                    Some(child) => match child.try_wait() {
+                        Ok(Some(status)) => {
+                            *p = None;
+                            break status.success();
+                        }
+                        Ok(None) => {}
+                        Err(_) => {
+                            *p = None;
+                            killed = true;
+                            break false;
+                        }
+                    },
+                    None => {
+                        // 被 stop 清除（已 kill）
+                        killed = true;
+                        break false;
+                    }
+                }
+            };
+            let _ = std::fs::remove_file(&mp3);
+
+            if success && !killed {
+                Ok(())
+            } else {
+                Err("stopped".into())
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
+    #[tauri::command]
+    pub fn edge_tts_stop() {
+        if let Ok(mut p) = player_lock().lock() {
+            if let Some(child) = p.as_mut() {
+                let _ = child.kill();
+            }
+            *p = None;
+        }
+    }
+}
+
+
+
 #[allow(clashing_extern_declarations)]
 #[cfg(target_os = "macos")]
 mod macos_tracking {
@@ -397,6 +604,27 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_tts::init())
+        // 老板键：系统级 Ctrl+W，无论应用是否聚焦，按下立即退出。
+        // 注册失败（如热键被占用）时降级为无老板键，绝不能 panic 导致闪退
+        .plugin({
+            let handler = |app: &tauri::AppHandle,
+                           _shortcut: &tauri_plugin_global_shortcut::Shortcut,
+                           event: tauri_plugin_global_shortcut::ShortcutEvent| {
+                if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    app.exit(0);
+                }
+            };
+            match tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(handler)
+                .with_shortcuts(["Control+W"])
+            {
+                Ok(b) => b.build(),
+                Err(e) => {
+                    eprintln!("[boss-key] Ctrl+W 注册失败（可能被其他应用占用）: {e:?}");
+                    tauri_plugin_global_shortcut::Builder::new().build()
+                }
+            }
+        })
         .plugin(tauri_plugin_log::Builder::default().build())
         .setup(|app| {
             APP_HANDLE.set(app.handle().clone()).ok();
@@ -459,7 +687,18 @@ pub fn run() {
             load_progress,
             save_epub_file,
             debug_log,
+            edge_tts::edge_tts_voices,
+            edge_tts::edge_tts_speak,
+            edge_tts::edge_tts_stop,
+            edge_tts::edge_tts_prefetch,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // 任何退出路径（老板键/关窗/Cmd+Q）都要停掉音频播放，
+            // afplay 是独立子进程，不会随 app 退出而终止
+            if let tauri::RunEvent::Exit = event {
+                edge_tts::edge_tts_stop();
+            }
+        });
 }

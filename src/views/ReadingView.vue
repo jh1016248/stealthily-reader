@@ -137,7 +137,20 @@
           </button>
         </div>
       </div>
-      <div v-if="ttsVoices.length > 0" class="settings-row">
+      <div class="settings-row">
+        <label>引擎</label>
+        <select class="tts-voice-select" v-model="ttsEngine">
+          <option value="edge">Edge 在线（推荐）</option>
+          <option value="system">系统语音</option>
+        </select>
+      </div>
+      <div v-if="ttsEngine === 'edge'" class="settings-row">
+        <label>音色</label>
+        <select class="tts-voice-select" v-model="ttsEdgeVoice">
+          <option v-for="v in edgeVoices" :key="v.id" :value="v.id">{{ v.name }}</option>
+        </select>
+      </div>
+      <div v-else-if="ttsVoices.length > 0" class="settings-row">
         <label>语音</label>
         <select class="tts-voice-select" v-model="ttsVoice">
           <option v-for="v in ttsVoices" :key="v.id" :value="v.id">{{ v.name }}</option>
@@ -303,6 +316,9 @@
             >
               {{ block }}
             </div>
+            <!-- 章节间大段空白：窗口推进（销毁上一章）发生在用户滚动经过空白区时，
+                 DOM 变动对视口的影响落在空白里，阅读位置不会发生可见跳变 -->
+            <div class="chapter-gap" aria-hidden="true"></div>
           </div>
           <div v-if="loadingNext" class="loading-next">加载下一章...</div>
         </template>
@@ -322,6 +338,8 @@ import type { Voice } from "tauri-plugin-tts-api";
 import {
   getChapterWindow,
   getExpandedTocAncestorPaths,
+  adjustScrollTopAfterTrim,
+  hasScrolledAPageIntoNextChapter,
 } from "../lib/reading-state";
 
 const route = useRoute();
@@ -390,6 +408,9 @@ const hideOnLeave = ref(true);
 const ttsVoices = ref<Voice[]>([]);
 const ttsVoice = ref("");
 const ttsRate = ref(1.0);
+const ttsEngine = ref<"edge" | "system">("edge");
+const ttsEdgeVoice = ref("zh-CN-XiaoxiaoNeural");
+const edgeVoices = ref<Array<{ id: string; name: string }>>([]);
 const ttsState = ref<"idle" | "playing" | "paused">("idle");
 const ttsChapterId = ref("");
 const ttsBlockIndex = ref(0);
@@ -519,6 +540,8 @@ const saveSettings = async () => {
         hide_on_leave: hideOnLeave.value,
         tts_voice: ttsVoice.value || null,
         tts_rate: ttsRate.value,
+        tts_engine: ttsEngine.value,
+        tts_edge_voice: ttsEdgeVoice.value,
       },
     });
   } catch {}
@@ -536,6 +559,9 @@ const loadSettings = async () => {
       hideOnLeave.value = settings.hide_on_leave;
     if (settings?.tts_voice) ttsVoice.value = settings.tts_voice;
     if (settings?.tts_rate) ttsRate.value = settings.tts_rate;
+    if (settings?.tts_engine === "system" || settings?.tts_engine === "edge")
+      ttsEngine.value = settings.tts_engine;
+    if (settings?.tts_edge_voice) ttsEdgeVoice.value = settings.tts_edge_voice;
   } catch {}
 };
 
@@ -651,27 +677,8 @@ const loadChapterWindow = async (centerChapterId: string) => {
   saveProgress();
 };
 
-const trimTopChapter = async () => {
-  if (chapterBlocks.value.length <= 3) return;
-  const removedId = chapterBlocks.value[0].id;
-  const el = contentRef.value?.querySelector(
-    `[data-chapter="${removedId}"]`,
-  ) as HTMLElement | null;
-  const removedHeight = el?.offsetHeight || 0;
-  const scrollTopBefore = contentRef.value?.scrollTop || 0;
-  chapterBlocks.value.shift();
-  if (removedHeight > 0 && scrollTopBefore > removedHeight) {
-    await nextTick();
-    if (contentRef.value) {
-      contentRef.value.scrollTop = scrollTopBefore - removedHeight;
-    }
-  }
-};
-
-const trimBottomChapter = () => {
-  if (chapterBlocks.value.length <= 3) return;
-  chapterBlocks.value.pop();
-};
+// 两章窗口（当前章 + 下一章）下不再需要按窗口大小 trim；
+// 上一章的销毁时机由 advanceChapterWindow 按滚动位置决定。
 
 const restoreProgress = async () => {
   const saved = await loadProgress();
@@ -690,6 +697,8 @@ const restoreProgress = async () => {
     ) as HTMLElement | null;
     if (chapterEl) {
       contentRef.value.scrollTop = chapterEl.offsetTop + (saved.scroll || 0);
+      lastScrollTop = contentRef.value.scrollTop;
+      suppressAutoLoadUntil = Date.now() + 500;
     }
   }
 };
@@ -704,42 +713,92 @@ const selectChapter = async (chapterId: string) => {
     ) as HTMLElement | null;
     if (chapterEl) {
       contentRef.value.scrollTop = chapterEl.offsetTop;
+      lastScrollTop = contentRef.value.scrollTop;
+      suppressAutoLoadUntil = Date.now() + 500;
     }
   }
 };
 
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+let lastScrollTop = 0;
+// 程序化调整 scrollTop 后的冷却期：防止补偿结果落在顶部 50px 内
+// 触发"加载上一章"，把刚销毁的章节又加回来造成来回跳动
+let suppressAutoLoadUntil = 0;
 
 const onScroll = () => {
   if (!contentRef.value || loading.value) return;
-  const { scrollTop, scrollHeight, clientHeight } = contentRef.value;
+  const { scrollTop, clientHeight } = contentRef.value;
 
   currentChapterId.value = deriveCurrentChapterId();
 
-  if (scrollTop < 50 && !loadingPrev.value) {
+  const isUserScrollingUp = scrollTop < lastScrollTop - 2;
+  if (
+    scrollTop < 50 &&
+    isUserScrollingUp &&
+    !loadingPrev.value &&
+    Date.now() > suppressAutoLoadUntil
+  ) {
     loadPreviousChapter();
   }
-  if (scrollHeight - scrollTop - clientHeight < 50 && !loadingNext.value) {
-    loadNextChapter();
+  if (!loadingNext.value && Date.now() > suppressAutoLoadUntil) {
+    advanceChapterWindow();
   }
+  lastScrollTop = scrollTop;
 
   if (scrollTimer) clearTimeout(scrollTimer);
   scrollTimer = setTimeout(() => saveProgress(), 300);
 };
 
-const loadNextChapter = async () => {
-  const lastBlock = chapterBlocks.value[chapterBlocks.value.length - 1];
-  if (!lastBlock) return;
-  const lastIdx = chapters.value.findIndex((c) => c === lastBlock.id);
-  if (lastIdx < 0 || lastIdx >= chapters.value.length - 1) return;
-  if (loadingNext.value) return;
+/**
+ * 窗口推进：滚入下一章超过一页后，销毁上一章（当前章升为第一章），
+ * 再把新的下一章追加进来，保持窗口始终为 [当前章, 下一章]。
+ * 由于推进条件保证了 scrollTop 远大于被移除章节的高度，
+ * 滚动补偿后视口一定还停留在原阅读位置。
+ */
+const advanceChapterWindow = async () => {
+  const container = contentRef.value;
+  if (!container || chapterBlocks.value.length < 2) return;
+
+  const firstId = chapterBlocks.value[0].id;
+  const firstEl = container.querySelector(
+    `[data-chapter="${firstId}"]`,
+  ) as HTMLElement | null;
+  if (!firstEl) return;
+
+  // 未滚入下一章超过一页且未触底，不推进
+  if (
+    !hasScrolledAPageIntoNextChapter(
+      container.scrollTop,
+      container.clientHeight,
+      firstEl.offsetHeight,
+      container.scrollHeight,
+    )
+  )
+    return;
+
+  const firstIdx = chapters.value.indexOf(firstId);
+  if (firstIdx < 0) return;
 
   loadingNext.value = true;
-  const nextChapterId = chapters.value[lastIdx + 1];
-  const data = await fetchChapterData(nextChapterId);
-  if (data) chapterBlocks.value.push(data);
+  const removedHeight = firstEl.offsetHeight;
+  const scrollTopBefore = container.scrollTop;
+
+  // 1. 销毁上一章，并在重渲染后补偿滚动位置
+  chapterBlocks.value.shift();
   await nextTick();
-  await trimTopChapter();
+  container.scrollTop = adjustScrollTopAfterTrim(scrollTopBefore, removedHeight);
+  suppressAutoLoadUntil = Date.now() + 500;
+  lastScrollTop = container.scrollTop;
+
+  // 2. 追加新的下一章（firstIdx 是刚销毁的章节，当前章为 firstIdx+1，
+  //    因此要追加的是 firstIdx+2，否则会把当前章重复显示一遍）
+  const upcomingIdx = firstIdx + 2;
+  if (upcomingIdx < chapters.value.length) {
+    const upcomingId = chapters.value[upcomingIdx];
+    const data = await fetchChapterData(upcomingId);
+    if (data) chapterBlocks.value.push(data);
+  }
+
   saveProgress();
   loadingNext.value = false;
 };
@@ -765,8 +824,11 @@ const loadPreviousChapter = async () => {
   if (newEl && contentRef.value) {
     contentRef.value.scrollTop = scrollTopBefore + newEl.offsetHeight;
   }
+  suppressAutoLoadUntil = Date.now() + 500;
+  lastScrollTop = contentRef.value?.scrollTop || 0;
 
-  trimBottomChapter();
+  // 窗口回到两章：移除底部的下一章
+  if (chapterBlocks.value.length > 2) chapterBlocks.value.pop();
   saveProgress();
   loadingPrev.value = false;
 };
@@ -786,15 +848,103 @@ const getCurrentChapterBlocks = (): string[] => {
   return ch?.blocks || [];
 };
 
+// 朗读跟随：把正在朗读的段落滚动到视口中央
+const scrollToTtsBlock = () => {
+  if (!contentRef.value) return;
+  const blocks = contentRef.value.querySelectorAll(
+    `[data-chapter="${ttsChapterId.value}"] .text-block`,
+  );
+  const el = blocks[ttsBlockIndex.value] as HTMLElement | undefined;
+  if (!el) return;
+  const container = contentRef.value;
+  const target = el.offsetTop - container.clientHeight / 2 + el.offsetHeight / 2;
+  container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+};
+
 const speakBlock = async () => {
   const ch = chapterBlocks.value.find((c) => c.id === ttsChapterId.value);
   if (!ch || ttsBlockIndex.value >= ch.blocks.length) {
+    // 本章读完，自动续读下一章
+    if (ttsState.value === "playing") {
+      const idx = chapters.value.indexOf(ttsChapterId.value);
+      const nextId = chapters.value[idx + 1];
+      if (nextId) {
+        if (chapterBlocks.value.some((c) => c.id === nextId)) {
+          // 下一章已在窗口内，直接接上（滚动跟随会自动推进窗口）
+          ttsChapterId.value = nextId;
+          ttsBlockIndex.value = 0;
+          speakBlock();
+          return;
+        }
+        // 不在窗口内则加载
+        await loadChapterWindow(nextId);
+        ttsBlockIndex.value = 0;
+        speakBlock();
+        return;
+      }
+    }
     ttsState.value = "idle";
     return;
   }
+  const text = ch.blocks[ttsBlockIndex.value];
+  scrollToTtsBlock();
+
+  if (ttsEngine.value === "edge") {
+    // 短段落合并策略：从当前段向后累计，直到 ≥150 字或达到单次上限 400 字，
+    // 一次生成一组，减少请求次数与段间衔接点
+    const mergeFrom = (start: number): { text: string; count: number } => {
+      let merged = "";
+      let end = start;
+      while (end < ch!.blocks.length) {
+        const b = ch!.blocks[end];
+        if (merged && merged.length + b.length > 400) break;
+        merged += (merged ? "，" : "") + b;
+        end++;
+        if (merged.length >= 150) break;
+      }
+      return { text: merged, count: end - start };
+    };
+
+    const group = mergeFrom(ttsBlockIndex.value);
+    // 预取下一组：当前组播放期间后台合成，消除段间停顿
+    const nextGroup = mergeFrom(ttsBlockIndex.value + group.count);
+    if (nextGroup.text) {
+      invoke("edge_tts_prefetch", {
+        text: nextGroup.text,
+        voice: ttsEdgeVoice.value,
+        rate: ttsRate.value,
+      }).catch(() => {});
+    }
+    // 网络偶发失败指数退避重试（最多 5 次），避免朗读中途悄悄停止
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        await invoke("edge_tts_speak", {
+          text: group.text,
+          voice: ttsEdgeVoice.value,
+          rate: ttsRate.value,
+        });
+        // 自然播完，读下一组
+        if (ttsState.value === "playing") {
+          ttsBlockIndex.value += group.count;
+          speakBlock();
+        }
+        return;
+      } catch (e) {
+        if (e === "stopped") return; // 用户主动停止
+        console.error(`Edge TTS 第 ${attempt} 次失败:`, e);
+        if (attempt < 5) {
+          await new Promise((r) => setTimeout(r, 800 * attempt));
+        } else {
+          ttsState.value = "idle";
+        }
+      }
+    }
+    return;
+  }
+
   try {
     await speak({
-      text: ch.blocks[ttsBlockIndex.value],
+      text,
       language: null,
       voiceId: ttsVoice.value || null,
       rate: ttsRate.value,
@@ -808,11 +958,19 @@ const speakBlock = async () => {
   }
 };
 
+// 按当前引擎停止朗读（各引擎都发停止）
+const stopAllTts = async () => {
+  try {
+    if (ttsEngine.value === "edge") await invoke("edge_tts_stop");
+  } catch {}
+  await ttsStop();
+};
+
 const startTts = async (fromBlockIndex = 0) => {
   const blocks = getCurrentChapterBlocks();
   if (blocks.length === 0) return;
 
-  await ttsStop();
+  await stopAllTts();
   ttsChapterId.value = currentChapterId.value;
   ttsBlockIndex.value = fromBlockIndex;
   ttsState.value = "playing";
@@ -820,7 +978,7 @@ const startTts = async (fromBlockIndex = 0) => {
 };
 
 const startTtsFromBlock = async (chapterId: string, blockIdx: number) => {
-  await ttsStop();
+  await stopAllTts();
   ttsChapterId.value = chapterId;
   ttsBlockIndex.value = blockIdx;
   ttsState.value = "playing";
@@ -831,7 +989,7 @@ const toggleTts = async () => {
   if (ttsState.value === "idle") {
     await startTts();
   } else if (ttsState.value === "playing") {
-    await ttsStop();
+    await stopAllTts();
     ttsState.value = "paused";
   } else if (ttsState.value === "paused") {
     ttsState.value = "playing";
@@ -840,14 +998,14 @@ const toggleTts = async () => {
 };
 
 const stopTts = async () => {
-  await ttsStop();
+  await stopAllTts();
   ttsState.value = "idle";
 };
 
 const loadTtsVoices = async () => {
   try {
     const all = await getVoices();
-    ttsVoices.value = all.filter((v) => v.language.startsWith("zh"));
+    ttsVoices.value = all
     if (!ttsVoice.value && ttsVoices.value.length > 0) {
       ttsVoice.value = ttsVoices.value[0].id;
     }
@@ -857,7 +1015,7 @@ const loadTtsVoices = async () => {
 };
 
 // Auto-save settings on change
-watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave, ttsVoice, ttsRate], saveSettings);
+watch([textSize, textColor, bgColor, bgOpacity, hideOnLeave, ttsVoice, ttsRate, ttsEngine, ttsEdgeVoice], saveSettings);
 watch(currentChapterId, expandCurrentChapterAncestors);
 
 // 打开章节列表时自动滚到当前章节
@@ -880,14 +1038,26 @@ onMounted(async () => {
 
   // TTS 初始化
   await loadTtsVoices();
+  try {
+    edgeVoices.value = await invoke<Array<{ id: string; name: string }>>(
+      "edge_tts_voices",
+    );
+  } catch (e) {
+    console.error("Failed to load edge voices:", e);
+  }
   ttsUnlisten = await onSpeechEvent("speech:finish", () => {
-    if (ttsState.value === "playing") {
+    // 仅系统语音引擎走插件事件推进；Edge 引擎在 speakBlock 内自行推进
+    if (ttsEngine.value === "system" && ttsState.value === "playing") {
       ttsBlockIndex.value++;
       speakBlock();
     }
   });
   const ttsUnlistenCancel = await onSpeechEvent("speech:cancel", () => {
-    ttsState.value = "idle";
+    // 仅系统语音引擎响应取消事件；其他引擎的 stopAllTts 也会触发插件 stop，
+    // 若不区分会把刚设为 playing 的状态误重置，导致只播一段就停
+    if (ttsEngine.value === "system") {
+      ttsState.value = "idle";
+    }
   });
 
   const unlistenEnter = await listen("cursor-enter", () => onMouseEnter());
@@ -1300,6 +1470,10 @@ onMounted(async () => {
   text-indent: 2em;
   word-break: break-all;
   margin-bottom: 4px;
+}
+
+.chapter-gap {
+  height: 50vh;
 }
 
 .loading,
